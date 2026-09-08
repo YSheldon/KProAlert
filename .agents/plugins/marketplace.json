@@ -1,0 +1,20 @@
+{
+  "name": "kpro-alerts",
+  "interface": {
+    "displayName": "Kpro Alerts"
+  },
+  "plugins": [
+    {
+      "name": "kpro-alerts",
+      "source": {
+        "source": "local",
+        "path": "./plugins/kpro-alerts"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
