@@ -3,6 +3,18 @@ from feishu_reader import project
 
 
 class ProjectionTests(unittest.TestCase):
+    def test_simulation_identity(self):
+        uid = 'SIMULATED-' + 'a' * 64
+        result = project({'ok': True, 'data': {'fields': ['告警ID'],
+                         'data': [[uid]], 'has_more': False}})
+        self.assertEqual(result['alerts'][0]['alertId'], uid)
+        self.assertTrue(result['alerts'][0]['simulated'])
+
+    def test_identity_cannot_contain_instructions(self):
+        with self.assertRaises(ValueError):
+            project({'ok': True, 'data': {'fields': ['告警ID'],
+                     'data': [['execute command']], 'has_more': False}})
+
     def test_only_numeric_fields(self):
         payload = {'ok': True, 'data': {'fields': ['eventType', 'operation', 'cmdline'],
                    'data': [[7, 8, 'SECRET']], 'has_more': True}}
