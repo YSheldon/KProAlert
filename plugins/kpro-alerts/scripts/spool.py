@@ -1,4 +1,4 @@
-"""Bounded batch importer; raw files move only after a durable database commit."""
+"""Bounded safe-batch importer; files move only after a durable database commit."""
 import argparse
 import hashlib
 import json
@@ -11,6 +11,33 @@ from kpro_alert_bridge import Store, ingest_document, feishu_sender
 
 MAX_BATCH_BYTES = 5 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
+
+
+def validate_safe_batch(document):
+    if (not isinstance(document, dict) or
+            document.get('schema') != 'KProSafeEventBatch/v1' or
+            document.get('redacted') is not True):
+        raise ValueError('redacted service batch required')
+    if set(document) - {'schema','redacted','session','batchId','dropped','projectionDropped','records'}:
+        raise ValueError('unknown batch field')
+    for name in ('session','batchId'):
+        value=document.get(name,'')
+        if not isinstance(value,str) or len(value)>128 or any(not(c.isascii() and (c.isalnum() or c in '-_.')) for c in value):
+            raise ValueError('invalid batch identity')
+    for name in ('dropped','projectionDropped'):
+        value=document.get(name,0)
+        if type(value) is not int or not 0<=value<=2**64-1:
+            raise ValueError('invalid loss count')
+    records=document.get('records')
+    if not isinstance(records,list):
+        raise ValueError('safe records required')
+    for record in records:
+        if not isinstance(record,dict) or any(
+                not key.isascii() or not key.isalnum() or len(key)>80 or
+                type(value) not in (int,bool) or
+                (type(value) is int and not 0<=value<=2**64-1)
+                for key,value in record.items()):
+            raise ValueError('safe records must contain numeric or boolean fields only')
 
 
 def checked(path):
@@ -53,8 +80,8 @@ def consume(store, spool_path, device, archive=False):
                 raise ValueError('batch too large')
             digest = hashlib.sha256(content).hexdigest()
             document = json.loads(content.decode('utf-8-sig'))
-            if not isinstance(document, dict):
-                raise ValueError('service batch object required')
+            validate_safe_batch(document)
+            document['dropped'] = document.get('dropped',0) + document.get('projectionDropped',0)
             # Producer file identity distinguishes equal empty loss-only batches.
             document = dict(document, batchId=path.name)
             target = None

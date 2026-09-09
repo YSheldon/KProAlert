@@ -62,12 +62,18 @@ if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProces
     throw 'Use native 64-bit PowerShell for installation on this OS.'
 }
 if ([Environment]::OSVersion.Version.Major -lt 10) { throw 'This installer requires Windows 10 or later.' }
+$os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+$processorArchitectures = @(Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -ExpandProperty Architecture -Unique)
+if ($arch -ne 'x64' -or $os.ProductType -ne 1 -or [int]$os.BuildNumber -lt 22000 -or
+    $processorArchitectures.Count -ne 1 -or $processorArchitectures[0] -ne 9 -or $manifest.platform -ne 'windows11-x64') {
+    throw 'This first preview is restricted to Windows 11 x64 workstations.'
+}
 $candidate = $ValidateCandidate -and $manifest.releaseStatus -eq 'candidate'
 if ($manifest.schema -ne 'KProAlertRelease/v1' -or
     ($manifest.releaseStatus -ne 'verified' -and -not $candidate) -or $manifest.architecture -ne $arch) {
     throw 'Release schema/status/architecture gate failed.'
 }
-foreach ($gate in @('serviceF1ArtifactProduct','driverMicrosoftProduct','dllProduct','policySignature','endToEnd')) {
+foreach ($gate in @('serviceF1ArtifactProduct','driverMicrosoftProduct','dllProduct','policySignature','endToEnd','privateRawEventSpool')) {
     if ($candidate -and $gate -eq 'endToEnd') { continue }
     if ($manifest.gates.$gate -ne $true) { throw "Release gate is incomplete: $gate" }
 }
@@ -123,6 +129,31 @@ foreach ($entry in $manifest.files) {
 }
 Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $destination 'release-manifest.json')
 Copy-Item -LiteralPath $attestationPath -Destination (Join-Path $destination 'release-attestation.ps1')
+foreach ($privateDirectoryName in @('private-event-spool', 'logs')) {
+$privateSpool = Join-Path $destination $privateDirectoryName
+New-Item -ItemType Directory -Path $privateSpool | Out-Null
+$privateAcl = New-Object Security.AccessControl.DirectorySecurity
+$privateAcl.SetAccessRuleProtection($true,$false)
+$privateAcl.SetOwner((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')))
+foreach ($privateSid in @('S-1-5-18','S-1-5-32-544')) {
+    $privateAcl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
+        (New-Object Security.Principal.SecurityIdentifier($privateSid)), 'FullControl',
+        'ContainerInherit,ObjectInherit', 'None', 'Allow')))
+}
+Set-Acl -LiteralPath $privateSpool -AclObject $privateAcl
+$readback = Get-Acl -LiteralPath $privateSpool
+$rawOwner = (New-Object Security.Principal.NTAccount($readback.Owner)).Translate([Security.Principal.SecurityIdentifier]).Value
+if (-not $readback.AreAccessRulesProtected -or $rawOwner -ne 'S-1-5-32-544' -or $readback.Access.Count -ne 2) {
+    throw 'Private evidence ACL readback failed; service will not start.'
+}
+foreach ($rule in $readback.Access) {
+    $ruleSid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
+    if ($ruleSid -notin @('S-1-5-18','S-1-5-32-544') -or $rule.AccessControlType -ne 'Allow' -or
+        ($rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -ne [Security.AccessControl.FileSystemRights]::FullControl) {
+        throw 'Private evidence permissions are too broad or incomplete.'
+    }
+}
+}
 $spool = Join-Path $destination 'alert-spool'
 New-Item -ItemType Directory -Path $spool | Out-Null
 $spoolAcl = Get-Acl -LiteralPath $spool

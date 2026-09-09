@@ -2,6 +2,10 @@
 
 Give your assistant this repository URL and ask:
 
+Supported setup paths: Codex, WorkBuddy, Cursor, and Grok Bot. See
+[ASSISTANT-SETUP.md](ASSISTANT-SETUP.md) for native registration versus configuration
+handoff and the separate runtime acceptance checks.
+
 > Install KProAlert on my Windows PC, verify protection is active, and connect
 > this assistant for alert analysis. Show what will change before administrator
 > actions. Do not enable automatic destructive remediation.
@@ -34,6 +38,8 @@ Give your assistant this repository URL and ask:
    setup_config.py rather than replacing existing application settings. Keep the
    existing MCP identity on update; ensure the actual process exits and starts the
    new code, then verify integration_status codeSha256 and processId.
+   Prefer [ASSISTANT-SETUP.md](ASSISTANT-SETUP.md) for native Codex/WorkBuddy
+   registration or Grok host-tool handoff instead of manually reconstructing paths.
 7. Verify a clearly labeled synthetic event first, followed by an authorized benign
    real trigger. Match alert ID, event type, operation and actual outcome end to end.
    Synthetic alerts must be excluded from real statistics and remediation.

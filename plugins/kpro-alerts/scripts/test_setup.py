@@ -5,6 +5,10 @@ from setup_config import build_config, save_config
 
 
 class SetupTests(unittest.TestCase):
+    def test_collector_health_is_explicit(self):
+        config=build_config(database='events.db',collector_health='collector-health.json')
+        self.assertTrue(Path(config['mcpServers']['kpro-alerts']['env']['KPRO_COLLECTOR_HEALTH']).is_absolute())
+
     def test_config_uses_absolute_paths(self):
         config = build_config(database='events.db')
         server = config['mcpServers']['kpro-alerts']
