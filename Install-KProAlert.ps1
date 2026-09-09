@@ -47,13 +47,10 @@ $attestationPath = Join-Path $source 'release-attestation.ps1'
 Assert-PlainPath $attestationPath
 if ((Get-Item -LiteralPath $attestationPath).Length -gt 65536) { throw 'Attestation is too large.' }
 $attestationBytes = [IO.File]::ReadAllBytes($attestationPath)
-$attestationSignature = Get-AuthenticodeSignature -Content $attestationBytes -SourcePathOrExtension '.ps1'
-# Stable product identity, not an Artifact Signing short-lived leaf certificate.
-$productThumbprint = '939F263EA341994910FA2A9573A16643FD34FE04'
-if ($attestationSignature.Status -ne 'Valid' -or $attestationSignature.SignerCertificate.Thumbprint -ne $productThumbprint) {
-    throw 'Release attestation is not signed by the trusted product identity.'
-}
-$attestedHashes = @([regex]::Matches(([Text.Encoding]::UTF8.GetString($attestationBytes)),
+Import-Module (Join-Path $PSScriptRoot 'tools\KProReleaseTrust.psm1') -Force
+$attestationIdentity = Assert-KProReleaseAttestation -Bytes $attestationBytes
+$attestationText = ConvertFrom-KProAttestationText -Bytes $attestationBytes
+$attestedHashes = @([regex]::Matches($attestationText,
     '(?m)^# KPRO-MANIFEST-SHA256: ([A-Fa-f0-9]{64})\r?$'))
 if ($attestedHashes.Count -ne 1 -or $attestedHashes[0].Groups[1].Value -ne $ManifestSha256) {
     throw 'Signed attestation does not bind this manifest.'
@@ -95,7 +92,7 @@ foreach ($service in @('KProSvc','KProFilter','KDirProSvc','KCritDirCtrlSvc')) {
 }
 $destination = Join-Path $env:ProgramFiles 'KProAlert'
 if (Test-Path -LiteralPath $destination) { throw 'Destination exists; refusing to overwrite.' }
-$plan = [ordered]@{mode='verified-plan';candidateValidation=[bool]$candidate;architecture=$arch;version=$manifest.version;destination=$destination;
+$plan = [ordered]@{mode='verified-plan';attestationIdentity=$attestationIdentity;candidateValidation=[bool]$candidate;architecture=$arch;version=$manifest.version;destination=$destination;
     installsDriver=$true;installsElamDriver=$false;automaticAiRemediation=$false;requiresAdministrator=$true;
     deliveryUserSid=$DeliveryUserSid}
 if (-not $Apply) { $plan | ConvertTo-Json; return }

@@ -20,10 +20,24 @@ Runtime config and policy are signed by the existing product trust chain, not by
 this Python plugin. Do not publish fixture private keys or issue a production policy
 with example signing keys. The driver remains the authority for accepting policy.
 
-The package also contains release-attestation.ps1, a product-signed data file with
+The package also contains release-attestation.ps1, an Authenticode-signed data file with
 exactly one `# KPRO-MANIFEST-SHA256: <digest>` comment. The installer never executes
-it. Its valid Authenticode signer must match the trusted product certificate, and
-its digest must match both release-manifest.json and the operator's expected hash.
+it. Its digest must match both release-manifest.json and the operator's expected hash.
+The installer authenticates the same in-memory bytes it parses. It accepts either
+the existing product certificate or the explicitly pinned Artifact Signing
+subscriber EKU plus Microsoft PCA fingerprint, after Valid Authenticode and
+timestamp checks and online certificate-chain/revocation validation. It never
+accepts an arbitrary trusted publisher or pins a rotating Artifact leaf certificate.
+Only certificate time is ignored during the additional identity-chain build,
+because Authenticode has already verified timestamp-based validity; unknown CAs
+and revocation errors are not ignored. The attestation is decoded with strict
+BOM-aware UTF-8 or UTF-16 LE parsing; malformed encoding and NUL are rejected.
+This changes no driver public key, runtime configuration or policy.
+
+The publisher gate is implemented in tools/KProReleaseTrust.psm1, which must
+travel with the reviewed installer source. No release-provided file can override
+its allowed publisher identity. Actual signed PS1 round-trip acceptance remains
+a release gate until the updated signing service is deployed and exercised.
 No attestation is generated with verified gates until actual release tests pass.
 
 The approved default is the maximum ransomware profile: ransomware enabled,
