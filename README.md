@@ -4,6 +4,9 @@ Public preview of the KPro alert integration tools and Codex plugin packaging.
 This repository contains no drivers, signing material, credentials or telemetry.
 It is a clean source export, not a mirror of private repository history.
 
+For the user-facing installation workflow, read [START-HERE.md](START-HERE.md).
+The binary release and automatic notification gates are not complete yet.
+
 ## Capabilities
 
 - Read-only stdio MCP: local_alerts and feishu_alerts.

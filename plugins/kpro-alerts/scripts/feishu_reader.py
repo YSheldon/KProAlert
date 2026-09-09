@@ -32,6 +32,8 @@ def project(payload):
             if type(value) not in (int, float) or not 0 <= value <= 9007199254740991 or int(value) != value:
                 raise ValueError('invalid numeric telemetry')
             item[FIELDS[field]] = int(value)
+        if 'alertId' not in item:
+            raise ValueError('missing alert identity; simulation status cannot be established')
         output.append(item)
     if type(data.get('has_more')) is not bool:
         raise ValueError('missing pagination status')
