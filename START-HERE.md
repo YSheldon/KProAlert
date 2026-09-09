@@ -1,0 +1,62 @@
+# Start here: install with your AI assistant
+
+Give your assistant this repository URL and ask:
+
+> Install KProAlert on my Windows PC, verify protection is active, and connect
+> this assistant for alert analysis. Show what will change before administrator
+> actions. Do not enable automatic destructive remediation.
+
+## Instructions for the installing assistant
+
+1. Identify where your commands run. Linux/cloud MCP execution is not the user's
+   Windows PC. Never claim to install endpoint protection by installing Python in
+   a cloud computer. Use an explicitly authorized local Windows channel for the
+   protection component, and a separate read-only Feishu identity for cloud queries.
+2. Resolve an immutable released version. Check release evidence and file hashes,
+   Windows signatures, native architecture, OS support, free disk and existing
+   security services. Do not use source-build outputs, test certificates or
+   sample signing keys as production artifacts. At present the binary release
+   gates are incomplete: stop before installing protection, not at source checkout.
+3. Explain deterministic protection, the scope of signed policy, privacy/export
+   choices, AI fees/availability and the effect on business-critical workflows.
+   Confirm first machine installation and each high-risk additional action.
+4. Use Install-KProAlert.ps1 without -Apply to produce a verified plan. It does not
+   download files or trust an unverified manifest. Only a trusted expected manifest
+   SHA256 can admit the package. The -Apply path is still undergoing physical-host
+   acceptance tests and must not be recommended as production-ready.
+5. Configure the background bridge and destination independently from MCP. Raw
+   events stay in access-controlled local storage; only approved fields are exported.
+   A disconnected AI app must not disable protection. Surface loss/quota/sync errors.
+6. Install MCP in an isolated Python environment on its execution host. Use
+   setup_config.py rather than replacing existing application settings. Keep the
+   existing MCP identity on update; ensure the actual process exits and starts the
+   new code, then verify integration_status codeSha256 and processId.
+7. Verify a clearly labeled synthetic event first, followed by an authorized benign
+   real trigger. Match alert ID, event type, operation and actual outcome end to end.
+   Synthetic alerts must be excluded from real statistics and remediation.
+   Only operator-confirmed synthetic IDs count as verified simulations; an editable
+   SIMULATED- prefix alone is not authority to suppress a security alert.
+8. Only enable a client-native analysis routine when that specific client and user
+   consent are verified. Poll bounded pages, preserve a cursor/dedup state, summarize
+   related events and notify on meaningful new risk or a failed protection state.
+   The current plugin does not itself create or guarantee such routines.
+
+## Advice contract
+
+Use alert_guidance with the user-selected profile (home, office, developer or
+business_critical) and actual alert ID. It supplies deterministic context; use the
+assistant's reasoning to explain unknowns and ask focused questions. Do not equate
+an event name with confirmed malware, or a partial block with zero damage.
+
+Always separate observed evidence, inference, recommended actions and actions
+actually executed. Preserve the operating user's business context and backup needs.
+No tool currently executes quarantine, termination, deletion or policy changes.
+
+## Current support matrix
+
+| Integration | Proven | Not yet proven |
+|---|---|---|
+| Grok Bot custom stdio | User-reported tool load and synthetic Feishu read | Complete Windows installer, automatic routine |
+| Codex | Plugin structure and SDK stdio tests | Clean client install and real event notification |
+| WorkBuddy | Candidate MCP configuration only | Application tool loading and notifications |
+| Windows service | x86/x64 build and native mock spool test | Signed service deployment, reboot recovery, real event flow |

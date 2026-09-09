@@ -5,6 +5,16 @@ description: Query locally collected KPro security events and explain their raw 
 
 # KPro Alerts
 
+For installation requests, follow repository START-HERE.md and fail closed when
+the signed Windows release is unavailable. Never claim cloud MCP installation
+installs protection on a Windows workstation. There is no automatic remediation
+tool; recommendations and observed protection results must be clearly separated.
+
+When MCP is configured, call integration_status first after an update. Compare
+the process code fingerprint, not only the checkout SHA. Use alert_guidance for
+the user-selected context: home, office, developer or business_critical. Treat
+its advice as structured context, not proof of malware or permission to execute.
+
 Use the scripts/query.py shipped in this plugin, resolving its absolute location
 relative to this skill. Obtain the database path from the user's explicit local
 configuration; do not scan disks looking for private telemetry. Use an available

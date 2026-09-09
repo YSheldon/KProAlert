@@ -14,11 +14,15 @@ async def main():
         async with ClientSession(reader, writer) as session:
             await session.initialize()
             result = await session.list_tools()
-            assert {t.name for t in result.tools} == {'local_alerts', 'feishu_alerts'}
+            assert {t.name for t in result.tools} == {'local_alerts', 'feishu_alerts', 'integration_status', 'alert_guidance', 'collector_status'}
             assert all(t.annotations.readOnlyHint for t in result.tools)
             for name in ('local_alerts', 'feishu_alerts'):
                 reply = await session.call_tool(name, {'limit': 1})
                 assert 'not configured' in str(reply)
+            status = await session.call_tool('integration_status', {})
+            assert 'codeSha256' in str(status)
+            guidance = await session.call_tool('alert_guidance', {'alert_id': 'a'*64})
+            assert 'not configured' in str(guidance)
     print('PASS: stdio initialize, read-only tools, missing-configuration handling')
 
 
