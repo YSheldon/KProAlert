@@ -20,6 +20,17 @@ function Invoke-ServiceCommand([string[]]$Arguments) {
     & "$env:SystemRoot\System32\sc.exe" @Arguments | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Service operation failed ($LASTEXITCODE)." }
 }
+function New-KProProtectionService([string]$ExecutablePath) {
+    $binaryPath = '"' + $ExecutablePath + '"'
+    # Preserve literal quotes; a failed readback must not leave an auto-start item.
+    New-Service -Name KProSvc -BinaryPathName $binaryPath -StartupType Manual `
+        -DisplayName 'KPro Alert Protection' -ErrorAction Stop | Out-Null
+    $registered = Get-CimInstance Win32_Service -Filter "Name='KProSvc'" -ErrorAction Stop
+    if ($null -eq $registered -or $registered.PathName -cne $binaryPath -or
+        $registered.StartMode -ne 'Manual' -or $registered.StartName -ne 'LocalSystem') {
+        throw 'Service registration readback mismatch; do not start the service.'
+    }
+}
 
 $source = (Resolve-Path -LiteralPath $PackageRoot).ProviderPath
 Assert-PlainPath $source
@@ -124,8 +135,9 @@ $archiveAcl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRul
     $deliverySid, 'Modify', 'ContainerInherit,ObjectInherit', 'None', 'Allow')))
 Set-Acl -LiteralPath $archive -AclObject $archiveAcl
 $serviceExe = Join-Path $destination 'KProSvc.exe'
-Invoke-ServiceCommand @('create','KProSvc','binPath=',('"'+$serviceExe+'"'),'start=','auto','obj=','LocalSystem','DisplayName=','KPro Alert Protection')
+New-KProProtectionService $serviceExe
 Invoke-ServiceCommand @('sidtype','KProSvc','unrestricted')
+Set-Service -Name KProSvc -StartupType Automatic -ErrorAction Stop
 Invoke-ServiceCommand @('start','KProSvc')
 $service = Get-Service KProSvc
 $service.WaitForStatus('Running',[TimeSpan]::FromSeconds(90))

@@ -30,10 +30,15 @@ must never be distributed. This permission is not a claim that a package passed.
 - [ ] Background spool consumption, archival and disk-pressure behavior
 - [x] Readable diagnostics identifying loaded MCP code, not only checked-out SHA
 - [ ] Signed versioned Windows package and release manifest
+- [x] GitHub-approved maximum policy accepted by the production-signed driver
+- [x] Controlled physical x64 install, reboot recovery and product-authorized uninstall
 - [ ] Installer preflight, coexistence, policy activation, rollback and uninstall
 - [ ] Real event to outbox to Feishu to AI analysis evidence
 - [ ] Three client install/update and notification acceptance tests
 - [ ] User-specific advice and approval-bound remediation records
+
+See [CONTROLLED-VALIDATION.md](CONTROLLED-VALIDATION.md) for the narrower measured
+canary result. It does not close the public installer or three-client release gates.
 
 ## Explicit non-goals
 
