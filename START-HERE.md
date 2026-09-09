@@ -27,6 +27,9 @@ Give your assistant this repository URL and ask:
 5. Configure the background bridge and destination independently from MCP. Raw
    events stay in access-controlled local storage; only approved fields are exported.
    A disconnected AI app must not disable protection. Surface loss/quota/sync errors.
+   Use [BACKGROUND-DELIVERY.md](BACKGROUND-DELIVERY.md) and the current-user
+   Configure-KProDelivery.ps1 plan. This task has no administrator privileges and
+   does not copy another machine's authentication state.
 6. Install MCP in an isolated Python environment on its execution host. Use
    setup_config.py rather than replacing existing application settings. Keep the
    existing MCP identity on update; ensure the actual process exits and starts the
@@ -57,6 +60,10 @@ No tool currently executes quarantine, termination, deletion or policy changes.
 | Integration | Proven | Not yet proven |
 |---|---|---|
 | Grok Bot custom stdio | User-reported tool load and synthetic Feishu read | Complete Windows installer, automatic routine |
-| Codex | Plugin structure and SDK stdio tests | Clean client install and real event notification |
-| WorkBuddy | Candidate MCP configuration only | Application tool loading and notifications |
-| Windows service | x86/x64 build and native mock spool test | Signed service deployment, reboot recovery, real event flow |
+| Codex | Actual readback of controlled real-event Feishu summaries | Current-process upgrade and automatic notification |
+| WorkBuddy | Bundled engine connection and desktop connected indicator | In-conversation event analysis and notifications |
+| Windows service | Signed native x64 canary, policy acceptance, reboot recovery, benign events and authorized uninstall | Public installer/release acceptance and broader OS matrix |
+
+Current-user background delivery has separate physical runtime evidence; see
+[DELIVERY-VALIDATION.md](DELIVERY-VALIDATION.md). Do not combine these narrower
+results into a claim that all three applications install Windows protection.

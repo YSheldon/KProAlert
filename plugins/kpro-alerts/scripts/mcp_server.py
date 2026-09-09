@@ -78,14 +78,14 @@ def local_alerts(limit: int = 20) -> dict:
 
 
 @server.tool(annotations=read_only)
-def feishu_alerts(limit: int = 20) -> dict:
+def feishu_alerts(limit: int = 20, offset: int = 0) -> dict:
     """Read numeric Feishu alert summaries; never raw event text or command lines."""
     keys = ('KPRO_LARK_CLI', 'KPRO_FEISHU_BASE', 'KPRO_FEISHU_TABLE')
     values = [os.environ.get(key) for key in keys]
     if not all(values):
         return {'error': 'Feishu reader is not configured'}
     try:
-        return read(*values, limit)
+        return read(*values, limit, offset=offset)
     except Exception:
         return {'error': 'Feishu read failed; verify configuration and authorization locally'}
 

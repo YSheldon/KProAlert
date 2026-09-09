@@ -41,14 +41,19 @@ def project(payload):
             'scope': 'bounded page, not full statistics'}
 
 
-def read(cli, base, table, limit):
+def read(cli, base, table, limit, offset=0):
     if type(limit) is not int or not 1 <= limit <= 200:
         raise ValueError('limit must be 1..200')
+    if type(offset) is not int or not 0 <= offset <= 1000000:
+        raise ValueError('invalid page offset')
     args = [cli, 'base', '+record-list', '--base-token', base, '--table-id', table,
-            '--limit', str(limit), '--format', 'json', '--as', 'user']
+            '--limit', str(limit), '--offset', str(offset), '--format', 'json', '--as', 'user',
+            '--sort-json', json.dumps([{'field':'末次时间','desc':True}], ensure_ascii=False)]
     for field in ['告警ID', *FIELDS]:
         args.extend(['--field-id', field])
     result = subprocess.run(args, capture_output=True, encoding='utf-8', timeout=30)
     if result.returncode:
         raise ValueError('Feishu CLI failed; verify authentication locally')
-    return project(json.loads(result.stdout))
+    projected = project(json.loads(result.stdout))
+    projected['nextOffset'] = offset + len(projected['alerts']) if projected['hasMore'] else None
+    return projected

@@ -1,8 +1,8 @@
 # Installation and configuration
 
-Status: tested standalone MCP component, not a verified one-click Grok Bot installer.
-Use the reviewed feature branch until the MR is merged. Do not install from main
-expecting this feature before that merge.
+Status: MCP and controlled native Windows canary verified; the public Windows
+installer/release is not yet accepted. The default branch contains the merged
+preview, not a verified one-click protection release.
 
 ## Isolated Python environment
 
@@ -40,8 +40,13 @@ No credentials, public listener, tunnel, scheduled task or driver is installed.
 ## Remaining gates
 
 - Codex marketplace install/readback and Grok Bot native installation proof.
-- Signed KProSvc installer, queue ACL/retention and real event collection.
-- Real publication/readback and crash-safe uncertain-send reconciliation.
+- Public signed installer, production queue ACL and full retention/rollback acceptance.
+- App-native notification and uncertain-send reconciliation.
+
+For user-session background collection see [BACKGROUND-DELIVERY.md](BACKGROUND-DELIVERY.md).
+Feishu queries return newest updates first and expose an optional numeric `offset`
+and `nextOffset`. Preserve alert-ID/count deduplication while paging; concurrently
+updated pages are not a consistent full-table statistics snapshot.
 
 An empty database or Feishu table is not proof of active protection. AI tool calls
 are pull queries, not automatic incoming alerts. Main merge requires separate approval.

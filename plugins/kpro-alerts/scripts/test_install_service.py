@@ -8,6 +8,16 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 
 class ServiceInstallTests(unittest.TestCase):
+    def test_windows_contract_runs_in_ci(self):
+        workflow = (ROOT/'.github/workflows/test.yml').read_text()
+        self.assertIn('windows-latest', workflow)
+
+    def test_candidate_requires_explicit_validation_switch(self):
+        source = (ROOT / 'Install-KProAlert.ps1').read_text(encoding='utf-8-sig')
+        self.assertIn('[switch]$ValidateCandidate', source)
+        self.assertIn("$candidate = $ValidateCandidate -and $manifest.releaseStatus -eq 'candidate'", source)
+        self.assertIn("if ($candidate -and $gate -eq 'endToEnd') { continue }", source)
+
     def test_no_native_sc_create_quoting(self):
         source = (ROOT / 'Install-KProAlert.ps1').read_text(encoding='utf-8-sig')
         self.assertNotIn("@('create','KProSvc'", source)
