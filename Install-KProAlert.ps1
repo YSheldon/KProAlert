@@ -4,6 +4,7 @@ param(
     [Parameter(Mandatory)][string]$PackageRoot,
     [Parameter(Mandatory)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ManifestSha256,
     [Parameter(Mandatory)][ValidatePattern('^S-1-5-21-[0-9-]+$')][string]$DeliveryUserSid,
+    [switch]$ValidateCandidate,
     [switch]$Apply
 )
 Set-StrictMode -Version Latest
@@ -64,10 +65,13 @@ if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProces
     throw 'Use native 64-bit PowerShell for installation on this OS.'
 }
 if ([Environment]::OSVersion.Version.Major -lt 10) { throw 'This installer requires Windows 10 or later.' }
-if ($manifest.schema -ne 'KProAlertRelease/v1' -or $manifest.releaseStatus -ne 'verified' -or $manifest.architecture -ne $arch) {
+$candidate = $ValidateCandidate -and $manifest.releaseStatus -eq 'candidate'
+if ($manifest.schema -ne 'KProAlertRelease/v1' -or
+    ($manifest.releaseStatus -ne 'verified' -and -not $candidate) -or $manifest.architecture -ne $arch) {
     throw 'Release schema/status/architecture gate failed.'
 }
 foreach ($gate in @('serviceF1ArtifactProduct','driverMicrosoftProduct','dllProduct','policySignature','endToEnd')) {
+    if ($candidate -and $gate -eq 'endToEnd') { continue }
     if ($manifest.gates.$gate -ne $true) { throw "Release gate is incomplete: $gate" }
 }
 $required = @('KProSvc.exe','KProProtect.dll','KProFilter.sys','DrvCfg2.dat','default-policy.hex')
@@ -91,7 +95,7 @@ foreach ($service in @('KProSvc','KProFilter','KDirProSvc','KCritDirCtrlSvc')) {
 }
 $destination = Join-Path $env:ProgramFiles 'KProAlert'
 if (Test-Path -LiteralPath $destination) { throw 'Destination exists; refusing to overwrite.' }
-$plan = [ordered]@{mode='verified-plan';architecture=$arch;version=$manifest.version;destination=$destination;
+$plan = [ordered]@{mode='verified-plan';candidateValidation=[bool]$candidate;architecture=$arch;version=$manifest.version;destination=$destination;
     installsDriver=$true;installsElamDriver=$false;automaticAiRemediation=$false;requiresAdministrator=$true;
     deliveryUserSid=$DeliveryUserSid}
 if (-not $Apply) { $plan | ConvertTo-Json; return }
@@ -121,6 +125,7 @@ foreach ($entry in $manifest.files) {
     if ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne $entry.sha256) { throw 'Staged hash mismatch.' }
 }
 Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $destination 'release-manifest.json')
+Copy-Item -LiteralPath $attestationPath -Destination (Join-Path $destination 'release-attestation.ps1')
 $spool = Join-Path $destination 'alert-spool'
 New-Item -ItemType Directory -Path $spool | Out-Null
 $spoolAcl = Get-Acl -LiteralPath $spool

@@ -1,8 +1,19 @@
 import unittest
-from feishu_reader import project
+import json
+from types import SimpleNamespace
+from unittest.mock import patch
+from feishu_reader import project, read
 
 
 class ProjectionTests(unittest.TestCase):
+    def test_recent_first_and_bounded_page(self):
+        response = dict(ok=True, data=dict(fields=[], data=[], has_more=False))
+        with patch('feishu_reader.subprocess.run', return_value=SimpleNamespace(returncode=0, stdout=json.dumps(response))) as call:
+            read('cli', 'base', 'table', 20, offset=40)
+            command = call.call_args.args[0]
+            self.assertEqual(command[command.index('--offset')+1], '40')
+            self.assertEqual(json.loads(command[command.index('--sort-json')+1]), [{'field':'末次时间','desc':True}])
+
     def test_missing_identity_is_error(self):
         for fields, row in [(['eventType'], [7]), (['告警ID'], [None]), (['告警ID'], [''])]:
             with self.assertRaises(ValueError):

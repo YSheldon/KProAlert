@@ -89,7 +89,10 @@ class Store:
             groups[group_id]['lastReceived'] = received
         return list(groups.values())
 
-    def sync(self, sender):
+    def sync(self, sender, max_deliveries=None):
+        if max_deliveries is not None and (type(max_deliveries) is not int or not 1 <= max_deliveries <= 100):
+            raise ValueError('invalid delivery budget')
+        sent = 0
         for alert in self.export():
             payload = json.dumps(alert, sort_keys=True)
             uid = alert['alertId']
@@ -103,6 +106,8 @@ class Store:
                     raise RuntimeError('uncertain delivery requires reconciliation: ' + uid)
                 if previous and previous[2] == payload:
                     continue
+                if max_deliveries is not None and sent >= max_deliveries:
+                    return True
                 record_id = previous[1] if previous else None
                 self.db.execute('INSERT OR REPLACE INTO deliveries VALUES (?,?,?,?)',
                                 (uid, 'pending', record_id, payload))
@@ -112,6 +117,8 @@ class Store:
             with self.db:
                 self.db.execute('UPDATE deliveries SET state=?,record_id=? WHERE id=?',
                                 ('acknowledged', receipt, uid))
+            sent += 1
+        return False
 
 
 def feishu_sender(cli, base, table):

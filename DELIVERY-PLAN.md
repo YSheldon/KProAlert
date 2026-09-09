@@ -27,7 +27,8 @@ must never be distributed. This permission is not a claim that a package passed.
 - [x] Independent Linux Feishu authorization (user-provided receipt)
 - [x] Synthetic Feishu write/read and duplicate-send check
 - [x] Atomic bounded persistence and restart deduplication tests
-- [ ] Background spool consumption, archival and disk-pressure behavior
+- [x] Current-user task, bounded spool import/archive and restart deduplication
+- [ ] Production spool ACL and sustained disk-pressure/retention acceptance
 - [x] Readable diagnostics identifying loaded MCP code, not only checked-out SHA
 - [ ] Signed versioned Windows package and release manifest
 - [x] GitHub-approved maximum policy accepted by the production-signed driver

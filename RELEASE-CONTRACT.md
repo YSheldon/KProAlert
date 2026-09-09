@@ -26,8 +26,10 @@ it. Its valid Authenticode signer must match the trusted product certificate, an
 its digest must match both release-manifest.json and the operator's expected hash.
 No attestation is generated with verified gates until actual release tests pass.
 
-Default consumer policy must be explicitly reviewed: ransomware enabled, behavioral
-report-only escalation disabled, no blanket directory or raw-disk exceptions.
+The approved default is the maximum ransomware profile: ransomware enabled,
+report-only risk escalation enabled (`policyFlags=5`, `decisionMode=3`), with no
+protected directory objects or blanket raw-disk exceptions. This includes heuristic
+risk blocking and its false-positive tradeoff; it is not a guarantee of no damage.
 The user must be informed of deterministic bait and first-sector protection and
 their compatibility implications before enabling them.
 
