@@ -67,10 +67,22 @@ function Assert-KProReleasePublisher {
     } finally { $chain.Dispose() }
 }
 
+function Get-KProAttestationVerificationBytes {
+    param([byte[]]$Bytes, [version]$EngineVersion = $PSVersionTable.PSVersion)
+    if ($EngineVersion -lt [version]'7.4') {
+        # Older -Content requires UTF-16LE. Derive it from the captured snapshot,
+        # without rewriting or reopening the file and without tolerating a mismatch.
+        $text = ConvertFrom-KProAttestationText -Bytes $Bytes
+        return ,([Text.Encoding]::Unicode.GetBytes($text))
+    }
+    return ,$Bytes
+}
+
 function Assert-KProReleaseAttestation {
     param([Parameter(Mandatory)][byte[]]$Bytes)
     if (-not $Bytes.Length -or $Bytes.Length -gt 65536) { throw 'Invalid attestation size.' }
-    $signature = Get-AuthenticodeSignature -Content $Bytes -SourcePathOrExtension '.ps1'
+    $content = Get-KProAttestationVerificationBytes -Bytes $Bytes
+    $signature = Get-AuthenticodeSignature -Content $content -SourcePathOrExtension '.ps1'
     return Assert-KProReleasePublisher -Signature $signature
 }
 

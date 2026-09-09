@@ -23,7 +23,8 @@ with example signing keys. The driver remains the authority for accepting policy
 The package also contains release-attestation.ps1, an Authenticode-signed data file with
 exactly one `# KPRO-MANIFEST-SHA256: <digest>` comment. The installer never executes
 it. Its digest must match both release-manifest.json and the operator's expected hash.
-The installer authenticates the same in-memory bytes it parses. It accepts either
+The installer authenticates content derived exclusively from the same captured
+snapshot it parses. It accepts either
 the existing product certificate or the explicitly pinned Artifact Signing
 subscriber EKU plus Microsoft PCA fingerprint, after Valid Authenticode and
 timestamp checks and online certificate-chain/revocation validation. It never
@@ -34,10 +35,19 @@ and revocation errors are not ignored. The attestation is decoded with strict
 BOM-aware UTF-8 or UTF-16 LE parsing; malformed encoding and NUL are rejected.
 This changes no driver public key, runtime configuration or policy.
 
+For PowerShell earlier than 7.4, the `Get-AuthenticodeSignature -Content` API
+requires UTF-16LE. The verifier strictly decodes the captured snapshot and supplies
+that API's required in-memory representation; it never rewrites or reopens the
+file and never tolerates HashMismatch. PowerShell 7.4+ receives the original bytes.
+Both paths retain the same captured-text binding and publisher/timestamp checks.
+See the [Microsoft parameter contract](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.security/get-authenticodesignature#-content).
+
 The publisher gate is implemented in tools/KProReleaseTrust.psm1, which must
 travel with the reviewed installer source. No release-provided file can override
-its allowed publisher identity. Actual signed PS1 round-trip acceptance remains
-a release gate until the updated signing service is deployed and exercised.
+its allowed publisher identity. The scoped PS1 signing/verification and exact-hash
+artifact recovery succeeded in pipeline 2802; a Windows PowerShell 5.1 no-Apply
+installer plan and tamper-rejection check also passed. This does not close the
+separate installer Apply/reboot/uninstall or public release gates.
 No attestation is generated with verified gates until actual release tests pass.
 
 The approved default is the maximum ransomware profile: ransomware enabled,

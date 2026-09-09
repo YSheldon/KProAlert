@@ -1,9 +1,25 @@
-param([string]$ArtifactProofPath,[string]$OtherPublisherProofPath)
+param([string]$ArtifactProofPath,[string]$OtherPublisherProofPath,[string]$SignedPs1ProofPath)
 $ErrorActionPreference='Stop'
 $root=(Get-Item $PSScriptRoot).Parent.Parent.Parent.FullName
 Import-Module (Join-Path $root 'tools\KProReleaseTrust.psm1') -Force
 $module=Get-Module KProReleaseTrust
+if($SignedPs1ProofPath){
+    $signedBytes=[IO.File]::ReadAllBytes($SignedPs1ProofPath)
+    if((Assert-KProReleaseAttestation -Bytes $signedBytes) -ne 'artifact-signing'){throw 'Real PS1 publisher mismatch.'}
+    $tampered=[byte[]]$signedBytes.Clone()
+    $tampered[25]=$tampered[25] -bxor 1
+    $rejected=$false
+    try {Assert-KProReleaseAttestation -Bytes $tampered|Out-Null} catch {$rejected=$true}
+    if(-not $rejected){throw 'Tampered real PS1 accepted.'}
+    'PASS: real PS1 memory verification and tamper rejection'
+}
 $plain='# KPRO-MANIFEST-SHA256: '+('a'*64)+"`r`n"
+$raw=[Text.Encoding]::UTF8.GetBytes($plain)
+foreach($version in @('5.1','7.3','7.4')){
+    $actual=& $module {param($b,$v) Get-KProAttestationVerificationBytes -Bytes $b -EngineVersion $v} $raw ([version]$version)
+    $expected=if([version]$version -lt [version]'7.4'){[Text.Encoding]::Unicode.GetBytes($plain)}else{$raw}
+    if([Convert]::ToBase64String([byte[]]$actual) -ne [Convert]::ToBase64String($expected)){throw 'Wrong Authenticode content encoding for engine.'}
+}
 foreach($encoded in @(
     ,([Text.Encoding]::ASCII.GetBytes($plain))
     ,([byte[]](@(0xef,0xbb,0xbf)+[Text.Encoding]::UTF8.GetBytes($plain)))
