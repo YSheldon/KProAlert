@@ -16,7 +16,7 @@ from endpoint import probe
 
 _source_hash = hashlib.sha256(b''.join(
     Path(__file__).with_name(name).read_bytes()
-    for name in ('mcp_server.py', 'query.py', 'feishu_reader.py', 'guidance.py', 'collector_health.py', 'endpoint.py', 'EndpointFacts.ps1'))).hexdigest()
+    for name in ('mcp_server.py', 'query.py', 'feishu_reader.py', 'guidance.py', 'collector_health.py', 'endpoint.py', 'EndpointFacts.ps1', 'windows_tools.py'))).hexdigest()
 _started_pid = os.getpid()
 _plugin_version = json.loads((Path(__file__).parents[1] / '.codex-plugin/plugin.json').read_text())['version']
 _sdk_version = version('mcp')

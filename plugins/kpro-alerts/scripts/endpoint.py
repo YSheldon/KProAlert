@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+from windows_tools import native_tool
 
 
 def _result(state, device_id=None):
@@ -45,15 +46,13 @@ def classify(facts, expected_device_id):
     return _result('installed_not_running',device)
 
 
-def probe(expected_device_id='', *, platform=None, runner=None):
+def probe(expected_device_id='', *, platform=None, runner=None, tool_resolver=native_tool):
     if (platform or os.name) != 'nt':
         return _result('local_channel_required')
     runner=runner or subprocess.run
-    root=Path(os.environ.get('SystemRoot',r'C:\Windows'))
-    system='Sysnative' if os.environ.get('PROCESSOR_ARCHITEW6432') else 'System32'
-    executable=root/system/'WindowsPowerShell/v1.0/powershell.exe'
     script=Path(__file__).with_name('EndpointFacts.ps1')
     try:
+        executable=tool_resolver('WindowsPowerShell/v1.0/powershell.exe')
         result=runner([str(executable),'-NoProfile','-NonInteractive','-File',str(script)],
                       capture_output=True,text=True,timeout=25)
         if result.returncode != 0 or len(result.stdout)>16384:

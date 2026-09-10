@@ -64,13 +64,13 @@ class EndpointTests(unittest.TestCase):
         for runner in (Mock(side_effect=OSError('private details')),
                        Mock(return_value=SimpleNamespace(returncode=1,stdout='private details')),
                        Mock(return_value=SimpleNamespace(returncode=0,stdout='bad json'))):
-            result=probe(DEVICE, platform='nt', runner=runner)
+            result=probe(DEVICE, platform='nt', runner=runner,tool_resolver=lambda _: 'powershell.exe')
             self.assertEqual(result['state'], 'unknown')
             self.assertNotIn('private details', str(result))
 
     def test_probe_fixed_file_no_shell(self):
         runner=Mock(return_value=SimpleNamespace(returncode=0,stdout=json.dumps(facts())))
-        self.assertTrue(probe(DEVICE, platform='nt', runner=runner)['installEligible'])
+        self.assertTrue(probe(DEVICE, platform='nt', runner=runner,tool_resolver=lambda _: 'powershell.exe')['installEligible'])
         args, kwargs=runner.call_args
         self.assertIn('-File', args[0])
         self.assertNotIn('-Command', args[0])
