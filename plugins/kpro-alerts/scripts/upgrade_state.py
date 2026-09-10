@@ -41,6 +41,23 @@ STEPS={
 }
 
 
+def checked_plan(plan):
+    keys={'schema','state','old','new','requiresApproval','protectionInterruptionExpected',
+          'automaticRollback','nativeExecutionEnabled','planId'}
+    fields={'version','manifestSha256','policySha256','runtimeSha256','deviceId'}
+    if not isinstance(plan,dict) or set(plan)!=keys or plan['nativeExecutionEnabled'] is not False or plan['automaticRollback'] is not False:
+        raise ValueError('Native execution/unknown plan fields are not permitted')
+    if plan['requiresApproval'] is not True or plan['protectionInterruptionExpected'] is not True:
+        raise ValueError('Required safety metadata is missing')
+    if any(not isinstance(plan[k],dict) or set(plan[k])!=fields for k in ('old','new')):
+        raise ValueError('Invalid stored package bindings')
+    # Reconstruct data constraints only, never assert that native evidence exists.
+    expected=plan_upgrade({**plan['old'],'verified':True,'policySnapshotVerified':True,
+        'recoveryPackageVerified':True,'deliveryDrained':True},{**plan['new'],'verified':True})
+    if plan!=expected:raise ValueError('Stored plan constraints or identity differ')
+    return expected
+
+
 class Upgrade:
     def __init__(self,path):
         path=Path(path)
@@ -54,18 +71,16 @@ class Upgrade:
     def __exit__(self,*args):self.db.close()
 
     def create(self,plan):
-        if plan.get('schema')!='FalconProUpgradePlan/v1' or plan.get('state')!='planned':
-            raise ValueError('Invalid upgrade plan')
-        content={k:v for k,v in plan.items() if k!='planId'}
-        if hashlib.sha256(json.dumps(content,sort_keys=True).encode()).hexdigest()!=plan.get('planId'):
-            raise ValueError('Plan identity mismatch')
+        plan=checked_plan(plan)
         with self.db:
             self.db.execute('INSERT INTO upgrade_state VALUES (1,?,?)',('planned',json.dumps(plan,sort_keys=True)))
 
     def status(self):
-        row=self.db.execute('SELECT state,plan FROM upgrade_state WHERE id=1').fetchone()
+        row=self.db.execute('SELECT state,substr(plan,1,8193) FROM upgrade_state WHERE id=1').fetchone()
         if not row:raise ValueError('No upgrade transaction')
-        return dict(state=row[0],plan=json.loads(row[1]),nativeOutcomeProven=False)
+        states={'planned'}|{k+'_pending' for k in STEPS}|{s[1] for s in STEPS.values()}
+        if row[0] not in states or len(row[1])>8192:raise ValueError('Invalid stored upgrade state')
+        return dict(state=row[0],plan=checked_plan(json.loads(row[1])),nativeOutcomeProven=False)
 
     def begin(self,operation,approved=False):
         if operation not in STEPS:raise ValueError('Unsupported operation')
@@ -74,6 +89,7 @@ class Upgrade:
         before,_,_=STEPS[operation]
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
+            self.status()
             changed=self.db.execute('UPDATE upgrade_state SET state=? WHERE id=1 AND state=?',
                                     (operation+'_pending',before)).rowcount
             if changed!=1:raise ValueError('Step not eligible; reconcile previous native outcome first')

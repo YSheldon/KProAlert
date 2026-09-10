@@ -1,5 +1,7 @@
 import tempfile
 import unittest
+import hashlib
+import json
 from pathlib import Path
 from upgrade_state import Upgrade, plan_upgrade
 
@@ -11,6 +13,14 @@ def facts():
 
 
 class UpgradeTests(unittest.TestCase):
+    def test_self_consistent_execution_flag_is_rejected(self):
+        plan=plan_upgrade(facts(),{**facts(),'version':'1.2.0.300','manifestSha256':'e'*64})
+        plan['nativeExecutionEnabled']=True
+        plan['planId']=hashlib.sha256(json.dumps({k:v for k,v in plan.items() if k!='planId'},sort_keys=True).encode()).hexdigest()
+        with tempfile.TemporaryDirectory() as folder:
+            with Upgrade(Path(folder)/'upgrade.db') as u:
+                with self.assertRaises(ValueError):u.create(plan)
+
     def test_downgrade_and_unverified_policy_block(self):
         old=facts();new={**old,'version':'1.2.0.300','manifestSha256':'e'*64}
         self.assertEqual(plan_upgrade(old,new)['state'],'planned')
