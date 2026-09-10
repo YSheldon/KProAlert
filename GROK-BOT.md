@@ -1,5 +1,11 @@
 # FalconPro for Grok Bot
 
+Native role template: https://x.ai/bot/Wo-ftquvSgmRphqHSFP5w
+
+The published FalconPro template contains generic role and safety instructions,
+not credentials, personal source bindings, installed connectors or active routines.
+Importing it alone does not install endpoint protection or enable notifications.
+
 The reusable MCP implementation is `plugins/kpro-alerts/scripts/mcp_server.py`.
 Install dependencies in a dedicated Python 3.10+ environment using the adjacent
 requirements.txt. Start that interpreter with the absolute server script path.
