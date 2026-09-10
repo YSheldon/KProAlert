@@ -25,11 +25,14 @@ class ManifestTests(unittest.TestCase):
             for n in names:
                 (root/n).write_bytes(b'test')
                 files.append(dict(name=n, sha256=hashlib.sha256(b'test').hexdigest(), size=4))
-            manifest = dict(schema='KProAlertRelease/v1', architecture='x64', version='0.2.0',
+            manifest = dict(schema='KProAlertRelease/v1', architecture='x64', platform='windows11-x64', version='0.2.0',
                 releaseStatus='verified', files=files, gates={
                     'serviceF1ArtifactProduct': True, 'driverMicrosoftProduct': True,
-                    'dllProduct': True, 'policySignature': True, 'endToEnd': True})
+                    'dllProduct': True, 'policySignature': True, 'endToEnd': True, 'privateRawEventSpool': True})
             self.assertEqual(validate(manifest, root, 'x64')['fileCount'], 5)
+            missing = dict(manifest, gates=dict(manifest['gates'], privateRawEventSpool=False))
+            with self.assertRaises(ValueError):
+                validate(missing, root, 'x64')
             (root/'KProFilter.sys').write_bytes(b'tampered')
             with self.assertRaises(ValueError):
                 validate(manifest, root, 'x64')

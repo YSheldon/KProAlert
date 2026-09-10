@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 
-def build_config(database=None, cli=None, base=None, table=None):
+def build_config(database=None, cli=None, base=None, table=None, collector_health=None):
     if any((cli, base, table)) and not all((cli, base, table)):
         raise ValueError('Feishu requires CLI, base and table together')
     if not database and not cli:
@@ -13,6 +13,8 @@ def build_config(database=None, cli=None, base=None, table=None):
     env = {}
     if database:
         env['KPRO_ALERT_DATABASE'] = str(Path(database).resolve())
+    if collector_health:
+        env['KPRO_COLLECTOR_HEALTH'] = str(Path(collector_health).resolve())
     if cli:
         exe = Path(cli).resolve(strict=True)
         if not exe.is_file():
@@ -37,8 +39,9 @@ if __name__ == '__main__':
     parser.add_argument('--cli')
     parser.add_argument('--base')
     parser.add_argument('--table')
+    parser.add_argument('--collector-health')
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
-    config = build_config(args.database, args.cli, args.base, args.table)
+    config = build_config(args.database, args.cli, args.base, args.table, args.collector_health)
     save_config(args.output, config)
     print('Configuration generated; no client settings or services changed.')

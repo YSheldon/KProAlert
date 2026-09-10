@@ -4,7 +4,9 @@ No binary release is published until all gates pass. The public installer must
 consume an immutable versioned release and a trusted expected manifest SHA-256,
 not a mutable latest URL or file-supplied checksum alone.
 
-The initial native architecture package has exactly five payload files:
+The first preview is restricted to Windows 11 x64 workstations (not ARM64 or
+Windows Server). Its manifest must declare platform=windows11-x64. The initial
+native architecture package has exactly five payload files:
 KProSvc.exe, KProProtect.dll, KProFilter.sys, DrvCfg2.dat, default-policy.hex.
 The x86/x64 release archives normalize basenames for the selected native host.
 Do not install the x86 driver on an x64 host. Unsupported host matrices fail closed.
@@ -12,13 +14,20 @@ Do not install the x86 driver on an x64 host. Unsupported host matrices fail clo
 KProAlertRelease/v1 records version, architecture, releaseStatus=verified and
 files (name, SHA256, size). gates records completed release evidence for:
 serviceF1ArtifactProduct, driverMicrosoftProduct, dllProduct, policySignature,
-endToEnd. Boolean claims in this file are NOT cryptographic signature evidence.
+endToEnd and privateRawEventSpool. Boolean claims in this file are NOT cryptographic signature evidence.
 Publication verifies actual signatures; installation additionally validates Windows
 Authenticode on every executable/DLL/SYS and exact immutable file hashes.
 
 Runtime config and policy are signed by the existing product trust chain, not by
 this Python plugin. Do not publish fixture private keys or issue a production policy
 with example signing keys. The driver remains the authority for accepting policy.
+
+privateRawEventSpool admits only the newly validated service hash that writes
+original evidence into SYSTEM/Administrators-only private-event-spool and numeric/
+boolean projections into alert-spool. The installer sets and reads back protected
+raw ACLs and owner before starting the service. Deleting a user copy cannot remove
+the primary evidence. Existing raw-spool service candidates must be rebuilt,
+re-signed and tested before they can satisfy this gate.
 
 The package also contains release-attestation.ps1, an Authenticode-signed data file with
 exactly one `# KPRO-MANIFEST-SHA256: <digest>` comment. The installer never executes
@@ -49,6 +58,17 @@ artifact recovery succeeded in pipeline 2802; a Windows PowerShell 5.1 no-Apply
 installer plan and tamper-rejection check also passed. This does not close the
 separate installer Apply/reboot/uninstall or public release gates.
 No attestation is generated with verified gates until actual release tests pass.
+
+The previous service candidate completed its 171 Apply/reboot/uninstall lifecycle,
+but did not isolate raw evidence from the delivery account. That result cannot
+satisfy the new `privateRawEventSpool` gate. The changed service requires fresh
+signing and lifecycle/ACL validation before a new attestation can claim that gate.
+
+The privacy r4 candidate subsequently completed the 171 install, normal reboot,
+post-boot protection, safe-batch import/archive and authorized uninstall checks.
+Its private/log directory ACL readback passed. This is Windows 11 x64 candidate
+evidence only: assistant runtime acceptance and a public Release download test
+remain separate, and the candidate manifest still has `endToEnd:false`.
 
 The approved default is the maximum ransomware profile: ransomware enabled,
 report-only risk escalation enabled (`policyFlags=5`, `decisionMode=3`), with no

@@ -33,7 +33,7 @@ class WorkerTests(unittest.TestCase):
             root = Path(d)
             cfg = self.fixture(root)
             (root/'spool/batch.json').write_text(json.dumps(dict(
-                session='s', dropped=0, records=[dict(eventType=0, operation=2, sequence=1)])))
+                schema='KProSafeEventBatch/v1',redacted=True,session='s', dropped=0, records=[dict(eventType=0, operation=2, sequence=1)])))
             first = run_once(validate_config(cfg))
             self.assertEqual(first['health']['storedEvents'], 1)
             self.assertEqual(first['importedEvents'], 1)

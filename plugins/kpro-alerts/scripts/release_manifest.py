@@ -5,13 +5,13 @@ from pathlib import Path
 
 REQUIRED = {'KProSvc.exe', 'KProProtect.dll', 'KProFilter.sys', 'DrvCfg2.dat', 'default-policy.hex'}
 GATES = {'serviceF1ArtifactProduct', 'driverMicrosoftProduct', 'dllProduct',
-         'policySignature', 'endToEnd'}
+         'policySignature', 'endToEnd', 'privateRawEventSpool'}
 
 
 def validate(manifest, root, architecture):
     if manifest.get('schema') != 'KProAlertRelease/v1' or manifest.get('releaseStatus') != 'verified':
         raise ValueError('unverified release manifest')
-    if architecture not in ('x64', 'x86') or manifest.get('architecture') != architecture:
+    if architecture != 'x64' or manifest.get('architecture') != architecture or manifest.get('platform') != 'windows11-x64':
         raise ValueError('package architecture mismatch')
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?', str(manifest.get('version'))):
         raise ValueError('invalid release version')
