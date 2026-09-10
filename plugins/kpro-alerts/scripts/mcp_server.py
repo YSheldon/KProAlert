@@ -3,11 +3,12 @@ import os
 import hashlib
 import re
 import json
+import sqlite3
 from importlib.metadata import version
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
-from query import recent
+from query import recent, by_id
 from feishu_reader import read
 from guidance import advise
 from collector_health import read_health
@@ -46,21 +47,45 @@ def collector_status() -> dict:
 
 
 @server.tool(annotations=read_only)
-def alert_guidance(alert_id: str, profile: str = 'home') -> dict:
-    """Generate cautious personalized advice for a retrieved Feishu alert. Performs no action."""
+def alert_guidance(alert_id: str, profile: str = 'home', source: str = 'feishu', context: dict | None = None) -> dict:
+    """Personalized advice from a retrieved local/Feishu alert and bounded user context. No action."""
     if not re.fullmatch(r'(?:SIMULATED-)?[a-f0-9]{64}', alert_id):
         return {'error': 'Invalid alert ID'}
-    result = feishu_alerts(200)
-    if 'error' in result:
-        return result
-    matches = [a for a in result['alerts'] if a.get('alertId') == alert_id]
+    if source=='local':
+        path=os.environ.get('KPRO_ALERT_DATABASE')
+        if not path:
+            return {'error':'Local database is not configured'}
+        try:
+            alert=by_id(path,alert_id)
+            return {'alertId':alert_id,'source':'local','guidance':advise(alert,profile,context)}
+        except (OSError,ValueError,sqlite3.Error):
+            return {'error':'Local event unavailable or unsupported context'}
+    if source!='feishu':
+        return {'error':'Unsupported source'}
+    matches=[]
+    offset=0
+    for _ in range(10):
+        result=feishu_alerts(200,offset)
+        if 'error' in result:
+            return result
+        matches.extend(a for a in result['alerts'] if a.get('alertId')==alert_id)
+        if len(matches)>1:
+            return {'error':'Alert identity is duplicated in the queried source'}
+        if not result['hasMore']:
+            break
+        next_offset=result.get('nextOffset')
+        if type(next_offset) is not int or next_offset<=offset:
+            return {'error':'Source pagination did not advance'}
+        offset=next_offset
+    else:
+        return {'error':'Guidance lookup exceeded bounded source budget','hasMore':True}
     if len(matches) != 1:
-        return {'error': 'Alert not uniquely present in the queried page',
+        return {'error': 'Alert not uniquely present in the queried source',
                 'hasMore': result['hasMore']}
     known_simulations = os.environ.get('KPRO_SIMULATED_ALERT_IDS', '').split(',')
     matches[0]['simulationVerified'] = alert_id in known_simulations and alert_id.startswith('SIMULATED-')
     try:
-        return {'alertId': alert_id, 'guidance': advise(matches[0], profile)}
+        return {'alertId': alert_id, 'source':'feishu','guidance': advise(matches[0], profile, context)}
     except ValueError:
         return {'error': 'Unsupported profile or event schema'}
 

@@ -63,3 +63,7 @@ crash records.
 Neither worker nor MCP performs AI remediation or guarantees an AI app wakes up.
 An app-native analysis routine needs separate consent, deduplication and a bound
 notification destination.
+
+The shared workflow is documented in [NOTIFICATIONS.md](NOTIFICATIONS.md).
+Its notification journal is separate from the collection database; preserve both
+when reconciling an uncertain message delivery.
