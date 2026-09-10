@@ -6,12 +6,14 @@ import argparse
 
 
 NAMES=('Install-FalconPro.ps1','Install-KProAlert.ps1',
-       'plugins/kpro-alerts/scripts/EndpointFacts.ps1','tools/KProReleaseTrust.psm1')
+       'plugins/kpro-alerts/scripts/EndpointFacts.ps1','tools/KProReleaseTrust.psm1',
+       'Invoke-FalconProLifecycle.ps1','Uninstall-KProAlert.ps1',
+       'plugins/kpro-alerts/scripts/Invoke-PolicySnapshot.ps1')
 
 
 def build(root):
     root=Path(root)
-    return {'schema':'FalconProOnboardingSource/v1','files':[
+    return {'schema':'FalconProOnboardingSource/v2','files':[
         {'name':name,'sha256':hashlib.sha256((root/name).read_bytes()).hexdigest()}
         for name in NAMES]}
 

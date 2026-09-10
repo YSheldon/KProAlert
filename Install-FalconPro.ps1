@@ -31,7 +31,11 @@ function Assert-SourceFiles {
     $manifest = [Text.Encoding]::UTF8.GetString($manifestBytes).TrimStart([char]0xfeff) | ConvertFrom-Json
     $names = @('Install-FalconPro.ps1','Install-KProAlert.ps1',
         'plugins/kpro-alerts/scripts/EndpointFacts.ps1','tools/KProReleaseTrust.psm1')
-    if ($manifest.schema -cne 'FalconProOnboardingSource/v1' -or @($manifest.files).Count -ne $names.Count) {
+    if ($manifest.schema -ceq 'FalconProOnboardingSource/v2') {
+        $names += @('Invoke-FalconProLifecycle.ps1','Uninstall-KProAlert.ps1',
+            'plugins/kpro-alerts/scripts/Invoke-PolicySnapshot.ps1')
+    }
+    if ($manifest.schema -cnotin @('FalconProOnboardingSource/v1','FalconProOnboardingSource/v2') -or @($manifest.files).Count -ne $names.Count) {
         throw 'Unsupported onboarding source manifest.'
     }
     $seen = @{}

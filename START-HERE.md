@@ -1,5 +1,9 @@
 # Start here: install with your AI assistant
 
+Use [LIFECYCLE.md](LIFECYCLE.md) and the common `falconpro.py` entry for installation,
+upgrade, four-client setup and optional statistics. Existing release gates below
+still apply; the new executor needs its signed onboarding v2 distribution.
+
 For automatic local detection and installation after first confirmation, follow
 [LOCAL-ENDPOINT.md](LOCAL-ENDPOINT.md). Never treat the bot's cloud host as the PC.
 

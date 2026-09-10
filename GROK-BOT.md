@@ -26,8 +26,11 @@ paths or credentials. Do not copy local access tokens into a cloud configuration
 If the deployed Grok Bot only accepts hosted MCP, authenticated HTTP hosting is a
 separate pending task; stdio compatibility alone is not Grok Bot installation proof.
 
-No Grok Bot marketplace manifest or successful Grok Bot install is claimed yet.
-The Codex manifest is not interchangeable with a Grok Bot manifest.
+The public release branch does not pretend that a Codex manifest is a Grok Bot
+manifest. Use `falconpro.py setup --client grok` to produce the real
+`AddMcpServer` handoff, then verify the actual Grok process. Endpoint installation
+and upgrade still require the local Windows flow in LIFECYCLE.md; a Grok cloud
+runtime cannot perform them.
 
 Verification: run scripts/test_feishu_reader.py and scripts/test_mcp_stdio.py
 from the plugin directory. These test projection and MCP protocol behavior, not

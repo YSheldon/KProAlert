@@ -111,7 +111,7 @@ class EndpointTests(unittest.TestCase):
         import hashlib
         root=Path(__file__).resolve().parents[3]
         result=build(root)
-        self.assertEqual(len(result['files']),4)
+        self.assertEqual(result['schema'],'FalconProOnboardingSource/v2')
         self.assertEqual({entry['name'] for entry in result['files']},set(NAMES))
         for entry in result['files']:
             self.assertEqual(entry['sha256'],hashlib.sha256((root/entry['name']).read_bytes()).hexdigest())

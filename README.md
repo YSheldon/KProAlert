@@ -9,7 +9,12 @@ This repository contains no drivers, signing material, credentials or telemetry.
 It is a clean source export, not a mirror of private repository history.
 
 For the user-facing installation workflow, read [START-HERE.md](START-HERE.md).
+The common setup, signed download, installation, upgrade and opt-in statistics
+entry is [falconpro.py](falconpro.py); see [LIFECYCLE.md](LIFECYCLE.md).
 The binary release and automatic notification gates are not complete yet.
+The current public GitHub release is still a controlled validation candidate;
+the lifecycle source is implemented and tested, but it is not a stable GA
+release until the signed onboarding v2 bundle and native upgrade evidence pass.
 
 ## Capabilities
 
@@ -28,9 +33,10 @@ The user reported successful registration and discovery of both tools in Grok Bo
 via custom stdio MCP with no data sources configured. This is not proof of native
 marketplace installation, live telemetry delivery or unattended operation.
 
-No driver installer is included. Signed service distribution, bounded retention,
-uncertain-send reconciliation and real collection-to-notification verification
-remain pending. Treat this as a preview, not a production security service.
+Installer and ordinary-service upgrade sources are included. The new lifecycle
+entry requires signed onboarding assets and same-candidate native acceptance
+before public installation is enabled. Treat this as a preview, not a completed
+general-availability release.
 
 ## Tests
 

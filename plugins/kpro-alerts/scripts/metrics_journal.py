@@ -30,6 +30,12 @@ class Journal:
     def close(self):
         self.db.close()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
     def _identity(self):
         row=self.db.execute("SELECT value FROM metrics_meta WHERE key='installation'").fetchone()
         return row[0] if row else None
@@ -74,7 +80,7 @@ class Journal:
                 architecture=architecture,os_family=os_family,state=state,
                 simulated=self.db.execute("SELECT value FROM metrics_meta WHERE key='simulated'").fetchone()==('1',))
             dedupe=None
-            if kind in ('status','install_success','uninstall'):
+            if kind in ('status','install_success','uninstall','upgrade_success'):
                 parts={k:v for k,v in event.items() if k!='eventId'}
                 dedupe=hashlib.sha256(json.dumps(parts,sort_keys=True).encode()).hexdigest()
                 old=self.db.execute('SELECT id,substr(payload,1,4097) FROM metrics_events WHERE dedupe=?',(dedupe,)).fetchone()

@@ -17,6 +17,8 @@ PACKAGE={'KProSvc.exe','KProProtect.dll','KProFilter.sys','DrvCfg2.dat','default
          'release-manifest.json','release-attestation.ps1'}
 ONBOARDING={'Install-FalconPro.ps1','Install-KProAlert.ps1','onboarding-source.json',
             'plugins/kpro-alerts/scripts/EndpointFacts.ps1','tools/KProReleaseTrust.psm1'}
+LIFECYCLE_ONBOARDING=ONBOARDING|{'Invoke-FalconProLifecycle.ps1','Uninstall-KProAlert.ps1',
+            'plugins/kpro-alerts/scripts/Invoke-PolicySnapshot.ps1'}
 
 
 def elevated():
@@ -154,6 +156,10 @@ def acquire(destination,verify_descriptor,*,fetch=read_url):
             raise ValueError('Downloaded asset hash/size mismatch')
         archive=destination/(kind+'.zip')
         with archive.open('xb') as f:f.write(payload)
+        if kind=='onboarding':
+            with zipfile.ZipFile(archive) as z:
+                if 'Invoke-FalconProLifecycle.ps1' in z.namelist():
+                    allowed=LIFECYCLE_ONBOARDING
         unpack(archive,destination/kind,allowed)
     for kind,name,key in (('package','release-manifest.json','packageManifestSha256'),
                           ('onboarding','onboarding-source.json','sourceManifestSha256')):

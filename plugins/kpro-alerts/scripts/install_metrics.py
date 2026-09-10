@@ -8,7 +8,8 @@ import time
 
 
 KEYS={'schema','installationId','eventId','day','kind','version','architecture','osFamily','state','simulated'}
-KINDS={'install_started','install_success','install_failure','status','uninstall'}
+KINDS={'install_started','install_success','install_failure','status','uninstall',
+       'upgrade_started','upgrade_success','upgrade_failure'}
 STATES={'unknown','not_running','running_policy_unverified'}
 
 
@@ -72,7 +73,7 @@ def summarize(events, *, today, complete=False):
         identity=event['installationId']
         if event['kind']=='install_success':
             installed.add(identity)
-        if event['kind'] in ('status','install_success'):
+        if event['kind'] in ('status','install_success','upgrade_success'):
             observed[identity]=max(observed.get(identity,-1),event['day'])
             if today-29<=event['day']<=today:
                 versions.setdefault(event['version'],set()).add(identity)
@@ -87,6 +88,9 @@ def summarize(events, *, today, complete=False):
         activeInstallations30d=active(30),uniqueUsers=None,protectionVerified=False,
         reportedFailures=sum(e['kind']=='install_failure' for e in records.values()),
         reportedStarts=sum(e['kind']=='install_started' for e in records.values()),
+        reportedUpgradeStarts=sum(e['kind']=='upgrade_started' for e in records.values()),
+        reportedUpgradeSuccesses=sum(e['kind']=='upgrade_success' for e in records.values()),
+        reportedUpgradeFailures=sum(e['kind']=='upgrade_failure' for e in records.values()),
         versionObservations30d={version:len(ids) for version,ids in sorted(versions.items())})
 
 
