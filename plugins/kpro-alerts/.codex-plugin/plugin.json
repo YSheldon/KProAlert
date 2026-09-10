@@ -1,6 +1,6 @@
 {
   "name": "kpro-alerts",
-  "version": "0.2.0-preview",
+  "version": "0.2.1-preview",
   "description": "Read-only FalconPro alert queries from a configured local event database.",
   "author": {
     "name": "Local developer"

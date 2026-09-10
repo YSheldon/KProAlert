@@ -84,6 +84,13 @@ class EndpointTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_config(endpoint_device_id='cloud')
 
+    def test_registration_rejects_unrequested_sources(self):
+        from assistant_setup import equivalent
+        desired=dict(command='python',args=['server.py'],env={'KPRO_ENDPOINT_DEVICE_ID':DEVICE})
+        actual={**desired,'env':{**desired['env'],'KPRO_ALERT_DATABASE':'unrequested.db'}}
+        self.assertFalse(equivalent(actual,desired))
+        self.assertTrue(equivalent(desired,desired))
+
     def test_install_wrapper_gate_order(self):
         root=Path(__file__).resolve().parents[3]
         source=(root/'Install-FalconPro.ps1').read_text()
@@ -93,6 +100,18 @@ class EndpointTests(unittest.TestCase):
         self.assertNotIn('-ValidateCandidate',source)
         self.assertNotIn('ExecutionPolicy Bypass',source)
         self.assertIn('ExpectedDeviceId',source)
+        self.assertLess(source.index('Assert-SourceFiles'),source.index('function Assert-TargetAbsent'))
+        self.assertIn('SourceManifestSha256',source)
+
+    def test_source_manifest_covers_all_helpers(self):
+        from build_onboarding_manifest import build, NAMES
+        import hashlib
+        root=Path(__file__).resolve().parents[3]
+        result=build(root)
+        self.assertEqual(len(result['files']),4)
+        self.assertEqual({entry['name'] for entry in result['files']},set(NAMES))
+        for entry in result['files']:
+            self.assertEqual(entry['sha256'],hashlib.sha256((root/entry['name']).read_bytes()).hexdigest())
 
 
 if __name__=='__main__':

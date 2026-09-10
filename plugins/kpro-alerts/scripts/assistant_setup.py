@@ -50,7 +50,7 @@ def make_plan(client, database=None, cli=None, base=None, table=None,
 def equivalent(actual, desired):
     return (isinstance(actual, dict) and actual.get('command') == desired['command'] and
             actual.get('args', []) == desired['args'] and
-            all(actual.get('env', {}).get(k) == v for k, v in desired['env'].items()))
+            actual.get('env', {}) == desired['env'])
 
 
 def register(plan, runner=subprocess.run):

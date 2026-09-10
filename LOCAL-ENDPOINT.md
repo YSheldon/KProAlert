@@ -49,11 +49,15 @@ filter instances or enforcement. Connected MCP/empty alerts prove no protection.
 ## Confirm Once, Then Install
 
 Download an immutable admitted public release through the normal download
-channel. Verify the expected manifest digest from a trusted release source,
-never an alert URL. Keep reviewed installer sources and package on the local PC.
+channel. Verify both package and onboarding-source manifest digests from a trusted
+release source, never an alert URL. Independently verify Install-FalconPro.ps1
+against the trusted source manifest BEFORE executing it; self-checks cannot
+authenticate a substituted entry script. Stage sources and package in an
+administrator-controlled directory for elevated execution, not a writable shared
+folder. The wrapper verifies all four source files before invoking helpers.
 
 ```powershell
-.\Install-FalconPro.ps1 -ExpectedDeviceId <confirmed-device-id> -PackageRoot <verified-package> -ManifestSha256 <trusted-manifest-sha256> -DeliveryUserSid <local-user-sid>
+.\Install-FalconPro.ps1 -ExpectedDeviceId <confirmed-device-id> -SourceManifestSha256 <trusted-source-manifest-sha256> -PackageRoot <verified-package> -ManifestSha256 <trusted-package-manifest-sha256> -DeliveryUserSid <local-user-sid>
 ```
 
 Show the verified plan, device, package hash and privacy/export effects. Only
@@ -75,3 +79,9 @@ perform approved benign-event, policy and reboot-recovery verification. A runnin
 service alone is insufficient. User-enabled periodic checks may report changes,
 but must never reinstall or reset failures automatically. Unit/static tests do
 not replace physical-PC installation or UAC acceptance.
+
+Publishers generate `onboarding-source.json` with `build_onboarding_manifest.py`
+after script signing and publish its digest through the protected release channel.
+Recompute after any byte changes, including signing or line endings. Users must
+not generate a manifest from untrusted downloads and call it trusted. The manifest
+generator does not sign or approve a release.
