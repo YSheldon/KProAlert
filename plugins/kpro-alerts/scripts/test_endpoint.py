@@ -102,6 +102,9 @@ class EndpointTests(unittest.TestCase):
         self.assertIn('ExpectedDeviceId',source)
         self.assertLess(source.index('Assert-SourceFiles'),source.index('function Assert-TargetAbsent'))
         self.assertIn('SourceManifestSha256',source)
+        self.assertIn('ComputeHash($manifestBytes)',source)
+        self.assertIn('UTF8.GetString($manifestBytes)',source)
+        self.assertNotIn('Get-Content -LiteralPath $manifestPath',source)
 
     def test_source_manifest_covers_all_helpers(self):
         from build_onboarding_manifest import build, NAMES

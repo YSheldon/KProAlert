@@ -16,11 +16,19 @@ function Assert-SourceFiles {
     # Bootstrap independently verifies this entry script before execution.
     $manifestPath = Join-Path $PSScriptRoot 'onboarding-source.json'
     $manifestItem = Get-Item -LiteralPath $manifestPath -Force
-    if ($manifestItem.Length -gt 16384 -or
-        (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash -ne $SourceManifestSha256) {
+    if ($manifestItem -isnot [IO.FileInfo] -or $manifestItem.Length -gt 16384 -or
+        ($manifestItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+        throw 'Invalid onboarding source manifest.'
+    }
+    $manifestBytes = [IO.File]::ReadAllBytes($manifestPath)
+    if ($manifestBytes.Length -gt 16384) { throw 'Source manifest is too large.' }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { $digest = ([BitConverter]::ToString($sha.ComputeHash($manifestBytes))).Replace('-','') }
+    finally { $sha.Dispose() }
+    if ($digest -ne $SourceManifestSha256) {
         throw 'Untrusted onboarding source manifest.'
     }
-    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    $manifest = [Text.Encoding]::UTF8.GetString($manifestBytes).TrimStart([char]0xfeff) | ConvertFrom-Json
     $names = @('Install-FalconPro.ps1','Install-KProAlert.ps1',
         'plugins/kpro-alerts/scripts/EndpointFacts.ps1','tools/KProReleaseTrust.psm1')
     if ($manifest.schema -cne 'FalconProOnboardingSource/v1' -or @($manifest.files).Count -ne $names.Count) {
