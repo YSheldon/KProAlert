@@ -2,15 +2,20 @@
 import argparse
 import json
 import sys
+import re
 from pathlib import Path
 
 
-def build_config(database=None, cli=None, base=None, table=None, collector_health=None):
+def build_config(database=None, cli=None, base=None, table=None, collector_health=None, endpoint_device_id=None):
     if any((cli, base, table)) and not all((cli, base, table)):
         raise ValueError('Feishu requires CLI, base and table together')
-    if not database and not cli:
+    if not database and not cli and not endpoint_device_id:
         raise ValueError('configure a local database or Feishu source')
     env = {}
+    if endpoint_device_id:
+        if not isinstance(endpoint_device_id,str) or not re.fullmatch('[a-f0-9]{64}',endpoint_device_id):
+            raise ValueError('Confirm the local Windows device fingerprint before binding')
+        env['KPRO_ENDPOINT_DEVICE_ID'] = endpoint_device_id
     if database:
         env['KPRO_ALERT_DATABASE'] = str(Path(database).resolve())
     if collector_health:
@@ -40,8 +45,9 @@ if __name__ == '__main__':
     parser.add_argument('--base')
     parser.add_argument('--table')
     parser.add_argument('--collector-health')
+    parser.add_argument('--endpoint-device-id')
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
-    config = build_config(args.database, args.cli, args.base, args.table, args.collector_health)
+    config = build_config(args.database, args.cli, args.base, args.table, args.collector_health, args.endpoint_device_id)
     save_config(args.output, config)
     print('Configuration generated; no client settings or services changed.')

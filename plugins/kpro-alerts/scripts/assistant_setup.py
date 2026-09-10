@@ -30,10 +30,10 @@ def discover_client(client):
 
 
 def make_plan(client, database=None, cli=None, base=None, table=None,
-              client_command=None, workbuddy_config=None, collector_health=None):
+              client_command=None, workbuddy_config=None, collector_health=None, endpoint_device_id=None):
     if client not in ('codex', 'workbuddy', 'cursor', 'grok', 'generic'):
         raise ValueError('Unsupported assistant')
-    server = build_config(database, cli, base, table, collector_health)['mcpServers']['kpro-alerts']
+    server = build_config(database, cli, base, table, collector_health, endpoint_device_id)['mcpServers']['kpro-alerts']
     command = []
     if client in ('codex', 'workbuddy'):
         command = client_command or discover_client(client)
@@ -50,7 +50,7 @@ def make_plan(client, database=None, cli=None, base=None, table=None,
 def equivalent(actual, desired):
     return (isinstance(actual, dict) and actual.get('command') == desired['command'] and
             actual.get('args', []) == desired['args'] and
-            all(actual.get('env', {}).get(k) == v for k, v in desired['env'].items()))
+            actual.get('env', {}) == desired['env'])
 
 
 def register(plan, runner=subprocess.run):
@@ -131,10 +131,12 @@ def main():
     parser.add_argument('--table')
     parser.add_argument('--workbuddy-config')
     parser.add_argument('--collector-health')
+    parser.add_argument('--endpoint-device-id')
     parser.add_argument('--apply', action='store_true')
     args = parser.parse_args()
     plan = make_plan(args.client,args.database,args.cli,args.base,args.table,
-                     workbuddy_config=args.workbuddy_config,collector_health=args.collector_health)
+                     workbuddy_config=args.workbuddy_config,collector_health=args.collector_health,
+                     endpoint_device_id=args.endpoint_device_id)
     if args.apply:
         # Probe this interpreter, not a different PATH Python. No package download here.
         probe = subprocess.run([plan['server']['command'],'-I','-c',
