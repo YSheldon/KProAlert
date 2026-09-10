@@ -25,7 +25,7 @@ function New-KProProtectionService([string]$ExecutablePath) {
     $binaryPath = '"' + $ExecutablePath + '"'
     # Preserve literal quotes; a failed readback must not leave an auto-start item.
     New-Service -Name KProSvc -BinaryPathName $binaryPath -StartupType Manual `
-        -DisplayName 'KPro Alert Protection' -ErrorAction Stop | Out-Null
+        -DisplayName 'FalconPro Protection' -ErrorAction Stop | Out-Null
     $registered = Get-CimInstance Win32_Service -Filter "Name='KProSvc'" -ErrorAction Stop
     if ($null -eq $registered -or $registered.PathName -cne $binaryPath -or
         $registered.StartMode -ne 'Manual' -or $registered.StartName -ne 'LocalSystem') {
@@ -107,7 +107,7 @@ $principal = New-Object Security.Principal.WindowsPrincipal($identity)
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw 'Administrator consent is required. Re-run in an elevated native PowerShell.'
 }
-if (-not $PSCmdlet.ShouldProcess($destination, 'Install signed KPro service and driver; apply signed policy at service startup')) { return }
+if (-not $PSCmdlet.ShouldProcess($destination, 'Install signed FalconPro service and driver; apply signed policy at service startup')) { return }
 New-Item -ItemType Directory -Path $destination | Out-Null
 $acl = New-Object Security.AccessControl.DirectorySecurity
 $acl.SetAccessRuleProtection($true,$false)

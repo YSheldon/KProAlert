@@ -1,9 +1,9 @@
 ---
 name: kpro-alerts
-description: Query locally collected KPro security events and explain their raw event types without changing security policy or installing drivers.
+description: Query locally collected FalconPro security events and explain their raw event types without changing security policy or installing drivers.
 ---
 
-# KPro Alerts
+# FalconPro Alerts
 
 For installation requests, follow repository START-HERE.md and fail closed when
 the signed Windows release is unavailable. Never claim cloud MCP installation
@@ -30,7 +30,7 @@ threat event, and do not remap operation 8 (rename) to 16 (delete).
 No events means no records in this query, not proof of no threat or an active driver.
 Receipt timestamps are collection times, not verified event occurrence times.
 
-The plugin does not install KPro, start a background task, register a service,
+The plugin does not install FalconPro, start a background task, register a service,
 publish to Feishu, or wake Codex automatically. If no collector/database exists,
 report that prerequisite instead of claiming monitoring is enabled.
 Driver installation, credential changes, real message publication, policy changes

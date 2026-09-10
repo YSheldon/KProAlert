@@ -1,6 +1,6 @@
 # One repository entry, separate components
 
-Give the assistant `https://github.com/YSheldon/KProAlert` and ask it to follow
+Give Codex, Grok Bot, WorkBuddy or Cursor `https://github.com/YSheldon/KProAlert` and ask it to install **FalconPro** following
 START-HERE.md. The assistant must distinguish installing this query connector from
 installing Windows endpoint protection. First protection preview scope is Windows
 11 x64; a Linux Grok Bot cannot install a Windows driver into its own container.

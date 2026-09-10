@@ -1,4 +1,4 @@
-"""Read-only, bounded, privacy-preserving KPro event query."""
+"""Read-only, bounded, privacy-preserving FalconPro event query."""
 import argparse
 import json
 import re

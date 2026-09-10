@@ -12,7 +12,8 @@ async def main():
         args=[str(Path(__file__).with_name('mcp_server.py'))], env=env)
     async with stdio_client(params) as (reader, writer):
         async with ClientSession(reader, writer) as session:
-            await session.initialize()
+            initialized = await session.initialize()
+            assert initialized.serverInfo.name == 'FalconPro'
             result = await session.list_tools()
             assert {t.name for t in result.tools} == {'local_alerts', 'feishu_alerts', 'integration_status', 'alert_guidance', 'collector_status'}
             assert all(t.annotations.readOnlyHint for t in result.tools)

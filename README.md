@@ -1,6 +1,10 @@
-# KProAlert
+# FalconPro
 
-Public preview of the KPro alert integration tools and Codex plugin packaging.
+Public preview of the FalconPro alert integration tools and Codex plugin packaging.
+
+FalconPro is the product name across Codex, Grok Bot, WorkBuddy and Cursor.
+Existing repository URLs, `kpro-alerts` IDs, `KPRO_*` variables, protocol schemas
+and signed component filenames remain unchanged for compatibility. See [BRANDING.md](BRANDING.md).
 This repository contains no drivers, signing material, credentials or telemetry.
 It is a clean source export, not a mirror of private repository history.
 
@@ -10,7 +14,7 @@ The binary release and automatic notification gates are not complete yet.
 ## Capabilities
 
 - Read-only stdio MCP: local_alerts and feishu_alerts.
-- Local SQLite import and deduplication of exported KPro event batches.
+- Local SQLite import and deduplication of exported FalconPro event batches.
 - Explicitly configured Feishu summary publication; no automatic publication.
 - Standalone MCP configuration generation without overwriting client settings.
 
