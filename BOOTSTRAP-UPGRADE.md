@@ -68,8 +68,50 @@ it or permit arbitrary downgrade. Receipt booleans are assertions from the futur
 trusted native adapter, not cryptographic proof; NEVER feed event/AI-generated
 JSON into this library as authority to uninstall or mark success.
 
-Still required before upgrade Apply can be exposed: a service-side trusted
-effective-policy snapshot/recovery contract, native lifecycle adapter, protected
+The service-side snapshot/recovery contract and read-only native proof adapter
+now have source implementations. Still required before upgrade Apply can be exposed:
+the signed service/helper release, native lifecycle adapter, protected
 staging/transaction ownership, interrupted-upgrade reconciliation, and physical
 upgrade/reboot/rollback tests. Current code deliberately performs no uninstall,
 driver replacement, policy mutation or automatic rollback.
+
+## Native Policy Proof
+
+`native_upgrade.query_snapshot` obtains new stdout from the installed service;
+it does not import saved or AI-supplied receipts. It rejects cloud execution,
+unbound/different devices, stopped or conflicting protection, unadmitted helper
+bytes, transport failure and malformed responses. The helper digest and installed
+manifest digest must originate in admitted signed distributions, not alert text.
+
+`Invoke-PolicySnapshot.ps1` requires elevated native x64 Windows and protected
+staging below native Program Files. It rejects NULL DACLs and checks each source
+ancestor to that OS directory, including a protected ACL anchor. It verifies the installed service identity, signed manifest attestation,
+release gates and installed file hashes, holds deny-write/delete read handles,
+then runs only `--upgrade-snapshot` or `--upgrade-verify`. It verifies that the
+resident service PID is unchanged after the query. The known trust-module digest
+is bound in the helper. Updating that dependency requires a new helper release.
+Its unsigned source module has a repository LF rule so the bound bytes are stable
+across checkouts; this rule never normalizes signed PS1 release artifacts.
+No UAC bypass, remote endpoint selection, policy signing, service control or
+uninstall is provided by this helper.
+
+`policy_snapshot.parse_snapshot` validates the exact v1 native schema, exit and
+HRESULT statuses, operation, PID, transaction, device, digest and 30-second
+freshness. A one-second clock tolerance applies to invocation-start/future bounds.
+It rejects duplicate keys, extra fields, noncanonical integer values and oversize
+stdout. This parser alone does not authenticate externally supplied JSON.
+
+Older installed services without these two commands cannot be upgraded through
+this route. They remain running; an unknown command is not permission to fall
+back to disk-only checks or force reinstallation. The same transaction and digest
+must be verified immediately before authorized uninstall and after restoration.
+
+These new helper sources are not yet included in the published signed onboarding
+archive. Python/mock tests and PowerShell syntax checks do not prove an actual
+PPL exchange, elevation, restart or upgrade. `nativeExecutionEnabled` stays false
+until the remaining native lifecycle and release gates are satisfied.
+
+For PPL services, the old external `sc stop` uninstall sequence is not a usable
+upgrade transport. An independent service-internal, transaction-bound authorized
+uninstall request is still needed. It is not implemented by the read-only snapshot
+commands; do not bypass PPL or service self-protection to proceed.
