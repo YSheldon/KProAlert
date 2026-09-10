@@ -1,4 +1,4 @@
-# Grok Bot integration status
+# FalconPro for Grok Bot
 
 The reusable MCP implementation is `plugins/kpro-alerts/scripts/mcp_server.py`.
 Install dependencies in a dedicated Python 3.10+ environment using the adjacent

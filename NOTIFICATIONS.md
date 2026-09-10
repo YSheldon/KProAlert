@@ -1,4 +1,8 @@
-# Notifications and personalized advice
+# FalconPro Notifications and Personalized Advice
+
+Use **FalconPro** for every user-visible notification title and bot/task name,
+including Codex, Grok Bot, WorkBuddy and Cursor. Existing technical identifiers
+and configured paths remain unchanged; see [BRANDING.md](BRANDING.md).
 
 Protection, collection, delivery, and AI notification are separate stages. A
 successful read or generated draft is not proof of a delivered notification.

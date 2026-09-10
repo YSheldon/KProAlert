@@ -20,7 +20,7 @@ _started_pid = os.getpid()
 _plugin_version = json.loads((Path(__file__).parents[1] / '.codex-plugin/plugin.json').read_text())['version']
 _sdk_version = version('mcp')
 
-server = FastMCP('KPro Alerts')
+server = FastMCP('FalconPro')
 read_only = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 
 

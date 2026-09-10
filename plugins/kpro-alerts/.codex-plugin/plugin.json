@@ -1,18 +1,18 @@
 {
   "name": "kpro-alerts",
   "version": "0.2.0-preview",
-  "description": "Read-only KPro alert queries from a configured local event database.",
+  "description": "Read-only FalconPro alert queries from a configured local event database.",
   "author": {
     "name": "Local developer"
   },
   "skills": "./skills/",
   "interface": {
-    "displayName": "Kpro Alerts",
-    "shortDescription": "Use Kpro Alerts in Codex.",
-    "longDescription": "Query local KPro telemetry without installing drivers or changing security policy. Requires a separate collector.",
+    "displayName": "FalconPro",
+    "shortDescription": "Use FalconPro alerts in Codex.",
+    "longDescription": "Query local FalconPro telemetry without installing drivers or changing security policy. Requires a separate collector.",
     "developerName": "Local developer",
     "category": "Productivity",
     "capabilities": [],
-    "defaultPrompt": "Help me use Kpro Alerts."
+    "defaultPrompt": "Help me use FalconPro."
   }
 }

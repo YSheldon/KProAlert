@@ -1,4 +1,4 @@
-# KPro Alerts 0.1.0 (prototype)
+# FalconPro alert plugin (public preview)
 
 Skill-based Codex plugin with a read-only SQLite query tool. This is not yet the
 complete signed KProSvc installer or a published Git marketplace.

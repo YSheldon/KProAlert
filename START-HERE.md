@@ -11,7 +11,7 @@ After collection and read-only access are verified, follow
 suppression, native scheduling and personalized follow-up. Do not mark notification
 delivery complete merely because a draft was generated.
 
-> Install KProAlert on my Windows PC, verify protection is active, and connect
+> Install FalconPro on my Windows PC, verify protection is active, and connect
 > this assistant for alert analysis. Show what will change before administrator
 > actions. Do not enable automatic destructive remediation.
 
