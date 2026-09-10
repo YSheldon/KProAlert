@@ -6,6 +6,11 @@ Supported setup paths: Codex, WorkBuddy, Cursor, and Grok Bot. See
 [ASSISTANT-SETUP.md](ASSISTANT-SETUP.md) for native registration versus configuration
 handoff and the separate runtime acceptance checks.
 
+After collection and read-only access are verified, follow
+[NOTIFICATIONS.md](NOTIFICATIONS.md) for baseline initialization, duplicate
+suppression, native scheduling and personalized follow-up. Do not mark notification
+delivery complete merely because a draft was generated.
+
 > Install KProAlert on my Windows PC, verify protection is active, and connect
 > this assistant for alert analysis. Show what will change before administrator
 > actions. Do not enable automatic destructive remediation.

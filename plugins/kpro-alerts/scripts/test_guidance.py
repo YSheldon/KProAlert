@@ -3,6 +3,21 @@ from guidance import advise
 
 
 class GuidanceTests(unittest.TestCase):
+    def test_context_prioritizes_shared_damage_without_exception(self):
+        result=advise(dict(eventType=7), 'office', dict(ongoing_damage=True,
+            backup_status='missing',shared_storage=True,recent_activity='backup'))
+        self.assertEqual(result['urgency'],'urgent_review')
+        self.assertEqual(result['automaticActionsPerformed'],[])
+        self.assertIn('add_exception',result['approvalRequiredActions'])
+        self.assertEqual(result['questions'],[])
+        self.assertIn('共享',str(result['advice']))
+
+    def test_context_rejects_executable_or_untyped_input(self):
+        for context in ({'command':'run.exe'},{'ongoing_damage':'yes'},
+                        {'backup_status':'run.exe'},{'shared_storage':1}):
+            with self.assertRaises(ValueError):
+                advise(dict(eventType=7),'home',context)
+
     def test_simulation_not_threat(self):
         r = advise(dict(eventType=7, simulated=True, simulationVerified=True, alertId='SIMULATED-'+'a'*64), 'home')
         self.assertEqual(r['assessment'], 'simulation')
