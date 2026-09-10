@@ -15,7 +15,7 @@ async def main():
             initialized = await session.initialize()
             assert initialized.serverInfo.name == 'FalconPro'
             result = await session.list_tools()
-            assert {t.name for t in result.tools} == {'local_alerts', 'feishu_alerts', 'integration_status', 'alert_guidance', 'collector_status'}
+            assert {t.name for t in result.tools} == {'local_alerts', 'feishu_alerts', 'integration_status', 'alert_guidance', 'collector_status', 'endpoint_status'}
             assert all(t.annotations.readOnlyHint for t in result.tools)
             for name in ('local_alerts', 'feishu_alerts'):
                 reply = await session.call_tool(name, {'limit': 1})

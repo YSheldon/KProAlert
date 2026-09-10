@@ -12,10 +12,11 @@ from query import recent, by_id
 from feishu_reader import read
 from guidance import advise
 from collector_health import read_health
+from endpoint import probe
 
 _source_hash = hashlib.sha256(b''.join(
     Path(__file__).with_name(name).read_bytes()
-    for name in ('mcp_server.py', 'query.py', 'feishu_reader.py', 'guidance.py', 'collector_health.py'))).hexdigest()
+    for name in ('mcp_server.py', 'query.py', 'feishu_reader.py', 'guidance.py', 'collector_health.py', 'endpoint.py', 'EndpointFacts.ps1'))).hexdigest()
 _started_pid = os.getpid()
 _plugin_version = json.loads((Path(__file__).parents[1] / '.codex-plugin/plugin.json').read_text())['version']
 _sdk_version = version('mcp')
@@ -29,9 +30,20 @@ def integration_status() -> dict:
     """Identify the running code and configured sources, without exposing paths or credentials."""
     return dict(version=_plugin_version, mcpSdkVersion=_sdk_version, codeSha256=_source_hash, processId=_started_pid,
                 localConfigured=bool(os.environ.get('KPRO_ALERT_DATABASE')),
+                endpointBindingConfigured=bool(os.environ.get('KPRO_ENDPOINT_DEVICE_ID')),
                 feishuConfigured=all(os.environ.get(k) for k in
                     ('KPRO_LARK_CLI', 'KPRO_FEISHU_BASE', 'KPRO_FEISHU_TABLE')),
                 automaticRemediation=False, protectionStatus='not_probed')
+
+
+@server.tool(annotations=read_only)
+def endpoint_status() -> dict:
+    """Probe this execution host, not a cloud user's PC. Local device binding is mandatory.
+
+    Only not_installed permits offering a separately confirmed installation.
+    Never install from an unknown, unbound, mismatched or unhealthy result.
+    """
+    return probe(os.environ.get('KPRO_ENDPOINT_DEVICE_ID',''))
 
 
 @server.tool(annotations=read_only)
