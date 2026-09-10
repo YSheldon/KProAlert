@@ -1,5 +1,10 @@
 # One repository entry, separate components
 
+The common lifecycle entry is `falconpro.py`. This file covers MCP registration;
+read [LIFECYCLE.md](LIFECYCLE.md) for signed Windows installation, upgrade,
+reboot resume, recovery and metrics upload. Registration never counts as driver
+installation or endpoint protection.
+
 Give Codex, Grok Bot, WorkBuddy or Cursor `https://github.com/YSheldon/KProAlert` and ask it to install **FalconPro** following
 START-HERE.md. The assistant must distinguish installing this query connector from
 installing Windows endpoint protection. First protection preview scope is Windows

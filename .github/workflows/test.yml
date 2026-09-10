@@ -17,3 +17,6 @@ jobs:
       - run: python tools/validate_package.py
       - run: python -m unittest discover -s plugins/kpro-alerts/scripts -p 'test_*.py'
       - run: python plugins/kpro-alerts/scripts/test_mcp_stdio.py
+      - if: runner.os == 'Windows'
+        shell: powershell
+        run: ./plugins/kpro-alerts/scripts/test_lifecycle_native.ps1

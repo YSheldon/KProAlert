@@ -51,6 +51,20 @@ before accepting it as the same event. Conflicting duplicates require diagnosis.
 `prepare` marks the batch before returning it but DOES NOT upload. Only after
 native write success and remote record readback may the AI run:
 
+The common entry can perform the same explicit handoff with the user's authorized
+Lark CLI:
+
+```powershell
+python falconpro.py metrics --database <private-folder>/metrics.db upload `
+  --cli C:\path\to\lark-cli.exe --base <authorized-base> --table <authorized-table>
+python falconpro.py metrics --database <private-folder>/metrics.db upload `
+  --cli C:\path\to\lark-cli.exe --base <authorized-base> --table <authorized-table> --apply
+```
+
+The first command is a preview. The second writes only the allowlisted fields,
+requires the user's existing `--as user` Lark authentication, acknowledges only
+the returned `rec...` receipt, and marks a timeout `uncertain` without retrying.
+
 ```powershell
 python plugins/kpro-alerts/scripts/metrics_journal.py --database <private-folder>/metrics.db ack --event-id <event-id> --receipt <actual-rec-id>
 ```
@@ -90,7 +104,9 @@ of already uploaded records. Remote retention/deletion is managed in the
 user-authorized table. Never publish a global installation count from private
 tables the publisher cannot read: shared reporting requires explicit access.
 
-This implementation is an opt-in local journal and schema/aggregation library.
-It is not yet automatically wired into the Windows service or installer, nor
-does it create a cloud table or turn on telemetry. Native upload/readback must
+The common `falconpro.py` install/upgrade/resume entry accepts an existing opt-in
+`--metrics-database`. It records observed starts and post-reboot completion;
+upgrade completion does not increment installation count. Native uncertain
+outcomes are not counted as definite failures. No cloud table is created and
+telemetry remains disabled until the user consents. Native upload/readback must
 be validated against the destination chosen by the user before claiming delivery.

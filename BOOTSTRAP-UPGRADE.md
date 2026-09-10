@@ -1,5 +1,11 @@
 # FalconPro Acquisition And Upgrade Status
 
+The new [LIFECYCLE.md](LIFECYCLE.md) describes the executable ordinary-service
+upgrade path, durable recovery and common CLI. The older `upgrade_state.py`
+library below remains a non-executing model and does not grant native authority.
+Signed lifecycle onboarding v2 and native upgrade/reboot acceptance are still
+required before the new path is publicly released. PPL upgrades remain blocked.
+
 ## Download Without Manual Checksums
 
 After binding the actual local Windows endpoint, the assistant can run:
