@@ -1,5 +1,8 @@
 # Start here: install with your AI assistant
 
+For automatic local detection and installation after first confirmation, follow
+[LOCAL-ENDPOINT.md](LOCAL-ENDPOINT.md). Never treat the bot's cloud host as the PC.
+
 Give your assistant this repository URL and ask:
 
 Supported setup paths: Codex, WorkBuddy, Cursor, and Grok Bot. See

@@ -5,6 +5,14 @@ description: Query locally collected FalconPro security events and explain their
 
 # FalconPro Alerts
 
+For local detection and user-confirmed installation, follow `LOCAL-ENDPOINT.md`
+in the repository root. `endpoint_status` probes only the execution host: never
+identify a cloud host as the user's PC. Bind only an independently user-confirmed
+device fingerprint. Unknown/unbound/mismatched/partial/stopped states do not
+authorize installation. Offer the verified-release local installer only after
+confirmed absence, then require device/package-specific user approval and normal
+administrator consent. No read-only MCP tool installs or repairs protection.
+
 For installation requests, follow repository START-HERE.md and fail closed when
 the signed Windows release is unavailable. Never claim cloud MCP installation
 installs protection on a Windows workstation. There is no automatic remediation
