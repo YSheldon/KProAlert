@@ -24,6 +24,12 @@ delivery complete merely because a draft was generated.
 
 ## Instructions for the installing assistant
 
+RemoteX/SSH/SFTP are developer test transports, not product prerequisites. Do not
+ask ordinary users to configure them to install FalconPro. Use the assistant's
+existing authorized local Windows execution capability; do not confuse it with
+a cloud bot's command runner. Explain a missing local channel separately from a
+missing verified release or an existing conflicting installation.
+
 1. Identify where your commands run. Linux/cloud MCP execution is not the user's
    Windows PC. Never claim to install endpoint protection by installing Python in
    a cloud computer. Use an explicitly authorized local Windows channel for the

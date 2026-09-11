@@ -5,6 +5,12 @@ from setup_config import build_config, save_config
 
 
 class SetupTests(unittest.TestCase):
+    def test_explicit_onboarding_config_has_no_fake_source(self):
+        with self.assertRaises(ValueError):build_config()
+        self.assertEqual(build_config(onboarding_only=True)['mcpServers']['kpro-alerts']['env'],{})
+        with self.assertRaises(ValueError):build_config(cli='lark.exe',onboarding_only=True)
+        with self.assertRaises(ValueError):build_config(database='events.db',onboarding_only=True)
+
     def test_collector_health_is_explicit(self):
         config=build_config(database='events.db',collector_health='collector-health.json')
         self.assertTrue(Path(config['mcpServers']['kpro-alerts']['env']['KPRO_COLLECTOR_HEALTH']).is_absolute())

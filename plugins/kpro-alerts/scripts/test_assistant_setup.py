@@ -6,6 +6,31 @@ from assistant_setup import make_plan, register, equivalent
 
 
 class AssistantSetupTests(unittest.TestCase):
+    def test_first_setup_needs_no_database_or_cloud_credentials(self):
+        with tempfile.TemporaryDirectory() as d:
+            cli=Path(d)/'client.exe';cli.touch()
+            for client in ('codex','cursor','grok','workbuddy'):
+                plan=make_plan(client,client_command=[str(cli)])
+                self.assertTrue(plan['onboardingOnly'])
+                self.assertFalse(plan['dataSourcesConfigured'])
+                self.assertEqual(plan['server']['env'],{})
+                self.assertFalse(plan['installsDriver'])
+                self.assertFalse(plan['registersBackgroundTask'])
+            self.assertEqual(list(Path(d).iterdir()),[cli])
+
+    def test_onboarding_cannot_reset_existing_sources(self):
+        with tempfile.TemporaryDirectory() as d:
+            cli=Path(d)/'client.exe';cli.touch()
+            plan=make_plan('codex',client_command=[str(cli)])
+            import json
+            existing={**plan['server'],'env':{'KPRO_ALERT_DATABASE':'existing.db'}}
+            calls=[]
+            def runner(*args,**kwargs):
+                calls.append(args)
+                return SimpleNamespace(returncode=0,stdout=json.dumps({'transport':existing}))
+            with self.assertRaises(RuntimeError):register(plan,runner)
+            self.assertEqual(len(calls),1)
+
     def test_cursor_handoff_does_not_invoke_cli_or_write_settings(self):
         plan=make_plan('cursor',database='events.db')
         def forbidden(*args,**kwargs):

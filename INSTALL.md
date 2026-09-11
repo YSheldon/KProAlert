@@ -20,6 +20,12 @@ python -m venv .venv
 
 ## Generate configuration
 
+For a new user without a collector or cloud source, use `falconpro.py setup
+--client <codex|cursor|grok|workbuddy>` first. The initial connector may have no
+data sources; it explicitly reports unconfigured queries instead of creating a
+fake database. The standalone generator supports `--onboarding-only` when a
+configuration handoff is needed. Normal source configurations remain explicit.
+
 Run using the virtual environment interpreter so the resulting configuration points
 to the interpreter that has MCP installed:
 
