@@ -12,12 +12,19 @@ DEVICE = 'a' * 64
 def facts(**updates):
     value = dict(schema='FalconProEndpointFacts/v1', deviceId=DEVICE,
                  supported=True, service='absent', driver='absent',
-                 conflicts=False, residualFiles=False)
+                 conflicts=False, residualFiles=False, architecture='x64')
     value.update(updates)
     return value
 
 
 class EndpointTests(unittest.TestCase):
+    def test_arm64_identity_is_propagated_without_guessing(self):
+        result = classify(facts(architecture='arm64'), DEVICE)
+        self.assertEqual(result['architecture'], 'arm64')
+        self.assertTrue(result['installEligible'])
+        for architecture in (None, 'x86', 'unknown'):
+            self.assertFalse(classify(facts(architecture=architecture), DEVICE)['installEligible'])
+
     def test_unbound_never_means_absent(self):
         result = classify(facts(), '')
         self.assertEqual(result['state'], 'target_unbound')

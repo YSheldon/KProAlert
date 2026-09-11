@@ -20,3 +20,6 @@ jobs:
       - if: runner.os == 'Windows'
         shell: powershell
         run: ./plugins/kpro-alerts/scripts/test_lifecycle_native.ps1
+      - if: runner.os == 'Windows'
+        shell: powershell
+        run: ./plugins/kpro-alerts/scripts/test_platform_native.ps1

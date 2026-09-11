@@ -6,6 +6,25 @@ from release_manifest import validate
 
 
 class ManifestTests(unittest.TestCase):
+    def test_arm64_requires_the_arm_file_set(self):
+        from release_manifest import GATES
+        names = ('KProSvcArm.exe', 'KProProtectArm.dll', 'KProFilterArm.sys', 'DrvCfg2.dat', 'default-policy.hex')
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            files = []
+            for name in names:
+                (root/name).write_bytes(b'fixture')
+                files.append(dict(name=name, size=7, sha256=hashlib.sha256(b'fixture').hexdigest()))
+            manifest = dict(schema='KProAlertRelease/v1', architecture='arm64', platform='windows11-arm64',
+                            version='1.2.0.300', releaseStatus='verified', files=files,
+                            gates={key: True for key in GATES})
+            self.assertEqual(validate(manifest, root, 'arm64')['architecture'], 'arm64')
+            with self.assertRaises(ValueError):
+                validate(manifest, root, 'x64')
+            manifest['files'][0]['name'] = 'KProSvc.exe'
+            with self.assertRaises(ValueError):
+                validate(manifest, root, 'arm64')
+
     def test_missing_signing_evidence_rejected(self):
         with tempfile.TemporaryDirectory() as d:
             with self.assertRaises(ValueError):

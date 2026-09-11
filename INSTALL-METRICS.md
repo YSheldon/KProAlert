@@ -31,6 +31,10 @@ python plugins/kpro-alerts/scripts/metrics_journal.py --database <private-folder
 python plugins/kpro-alerts/scripts/metrics_journal.py --database <private-folder>/metrics.db prepare
 ```
 
+The direct `metrics_journal.py prepare` command reserves rows for an explicit
+handoff; it is not the user-facing preview. Use the upload preview below when
+you need to inspect a batch without changing its state.
+
 The example version is illustrative, never authoritative. Record success only
 after the approved installer actually succeeded and its local result was checked.
 `install_started` and `install_failure` are distinct; downloading, importing a
@@ -48,8 +52,11 @@ paths/configuration or attach raw logs. Use installationId + eventId as the
 logical uniqueness key. For an existing remote record, compare the exact payload
 before accepting it as the same event. Conflicting duplicates require diagnosis.
 
-`prepare` marks the batch before returning it but DOES NOT upload. Only after
-native write success and remote record readback may the AI run:
+Preview is read-only and does not reserve or mutate journal rows. The explicit
+apply path marks the batch before networking, writes only the allowlisted fields
+with `base +record-upsert`, then reads the returned record with
+`base +record-get --record-id ... --format json --as user`. Only an exact
+readback of the event fields may acknowledge the journal row.
 
 The common entry can perform the same explicit handoff with the user's authorized
 Lark CLI:
@@ -61,9 +68,12 @@ python falconpro.py metrics --database <private-folder>/metrics.db upload `
   --cli C:\path\to\lark-cli.exe --base <authorized-base> --table <authorized-table> --apply
 ```
 
-The first command is a preview. The second writes only the allowlisted fields,
-requires the user's existing `--as user` Lark authentication, acknowledges only
-the returned `rec...` receipt, and marks a timeout `uncertain` without retrying.
+The first command is a repeatable preview. The second writes only the allowlisted
+fields, requires the user's existing `--as user` Lark authentication, accepts
+the CLI's single top-level `data.record_id_list` receipt (and legacy nested
+compatibility), verifies that record with readback, and only then acknowledges
+it. A timeout, malformed response, or readback mismatch is marked `uncertain`
+without retrying.
 
 ```powershell
 python plugins/kpro-alerts/scripts/metrics_journal.py --database <private-folder>/metrics.db ack --event-id <event-id> --receipt <actual-rec-id>
@@ -76,7 +86,8 @@ IDs and a nextCursor; use `status --after <cursor>` for further pages. Use
 Recovery does not authorize resending: first reconcile the target table, and if
 absence is established obtain approval before any new write. Recheck consent
 before writing. Neither prepared nor acknowledged proves the user's PC is safe.
-No script provided here sends data or reads credentials.
+No script reads credentials; only the explicit `--apply` path invokes the
+user-provided CLI to send the allowlisted fields.
 
 For acceptance only, enable a separate journal with `--consent --simulation`.
 All its records carry simulated=true and the aggregator excludes them from

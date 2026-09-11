@@ -22,6 +22,10 @@ release until the signed onboarding v2 bundle and native upgrade evidence pass.
 - Local SQLite import and deduplication of exported FalconPro event batches.
 - Explicitly configured Feishu summary publication; no automatic publication.
 - Standalone MCP configuration generation without overwriting client settings.
+- Architecture-bound Windows 11 x64/ARM64 installation and ordinary-service
+  upgrade/recovery sources, gated by signed release and native acceptance.
+- Consent-based installation statistics with exact upload readback and
+  uncertain-send protection; simulated acceptance records are excluded.
 
 See INSTALL.md and GROK-BOT.md. Python 3.10+ is required on the MCP execution host.
 Install dependencies in an isolated virtual environment. Configure data sources

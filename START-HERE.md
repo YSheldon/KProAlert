@@ -36,10 +36,12 @@ delivery complete merely because a draft was generated.
 3. Explain deterministic protection, the scope of signed policy, privacy/export
    choices, AI fees/availability and the effect on business-critical workflows.
    Confirm first machine installation and each high-risk additional action.
-4. Use Install-KProAlert.ps1 without -Apply to produce a verified plan. It does not
-   download files or trust an unverified manifest. Only a trusted expected manifest
-   SHA256 can admit the package. The -Apply path is still undergoing physical-host
-   acceptance tests and must not be recommended as production-ready.
+4. Use `falconpro.py install --device-id <confirmed-device-id>` to download the
+   matching signed release and produce a plan. After approval, use
+   `falconpro.py install --plan <plan-path> --apply --approve`. Do not reconstruct
+   low-level installer arguments or ask an ordinary user to supply hashes. Use
+   `--resume` after a normal reboot and `upgrade` for later signed releases.
+   Public release admission is still required; do not bypass it for convenience.
 5. Configure the background bridge and destination independently from MCP. Raw
    events stay in access-controlled local storage; only approved fields are exported.
    A disconnected AI app must not disable protection. Surface loss/quota/sync errors.
@@ -80,8 +82,9 @@ No tool currently executes quarantine, termination, deletion or policy changes.
 | Grok Bot custom stdio | User-reported tool load and synthetic Feishu read | Complete Windows installer, automatic routine |
 | Codex | Actual readback of controlled real-event Feishu summaries | Current-process upgrade and automatic notification |
 | WorkBuddy | Bundled engine connection and desktop connected indicator | In-conversation event analysis and notifications |
-| Windows service | Signed native x64 canary, policy acceptance, reboot recovery, benign events and authorized uninstall | Public installer/release acceptance and broader OS matrix |
+| Cursor | Native desktop MCP connection and read-only query | Current-revision install/upgrade and native notifications |
+| Windows service | Signed native x64 canary; ARM64 Microsoft/product signature normal-load validation | New public installer/upgrade/recovery and per-architecture full release admission |
 
 Current-user background delivery has separate physical runtime evidence; see
 [DELIVERY-VALIDATION.md](DELIVERY-VALIDATION.md). Do not combine these narrower
-results into a claim that all three applications install Windows protection.
+results into a claim that all four applications install Windows protection.

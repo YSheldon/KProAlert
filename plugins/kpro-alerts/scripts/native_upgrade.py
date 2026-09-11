@@ -55,7 +55,7 @@ def _query_snapshot_impl(device_id,transaction_id,manifest_sha256,helper_sha256,
     with helper.open('rb') as stream:source=stream.read(65537)
     if len(source)>65536 or hashlib.sha256(source).hexdigest()!=helper_sha256:
         raise ValueError('Native helper is not the admitted source')
-    command=[str(resolver('WindowsPowerShell/v1.0/powershell.exe')),'-NoProfile','-NonInteractive',
+    command=[str(resolver('WindowsPowerShell/v1.0/powershell.exe')),'-NoProfile','-NonInteractive','-ExecutionPolicy','RemoteSigned',
              '-File',str(helper),'-ExpectedDeviceId',device_id,'-TransactionId',transaction_id,
              '-ManifestSha256',manifest_sha256]
     if expected_digest is not None:command+=['-ExpectedDigest',expected_digest]

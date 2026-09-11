@@ -9,6 +9,13 @@ and reviewed revision, not an unrelated KPro source-directory prototype, are the
 source of the integration. Client runtime registration and Windows installation
 are verified independently.
 
+The Windows installation lane supports Windows 11 x64 and ARM64 workstations.
+The endpoint probe, signed release descriptor, manifest and PE Machine must all
+agree; unknown or changed architecture is rejected before installation. ARM64
+uses `KProSvcArm.exe`, `KProProtectArm.dll` and `KProFilterArm.sys`. It never
+selects x64 components just because the AI tool runs under emulation. Win7/x86
+driver support elsewhere in the product is not a public-installer support claim.
+
 ## Installation
 
 1. `python falconpro.py status` identifies the execution host. Confirm the actual
@@ -21,8 +28,8 @@ are verified independently.
 3. After approval, run `python falconpro.py install --plan <plan-path> --apply --approve`.
    The entry revalidates downloaded sources, the signed descriptor and all file
    hashes, verifies the native entry signature, then requests Windows elevation.
-   The native executor stages files under administrator-controlled Program Files
-   and invokes the existing DLL-backed product installer.
+  The native executor stages files under administrator-controlled Program Files
+  and invokes the existing DLL-backed product installer.
 4. `awaiting_reboot` means service, driver, collector and current effective-policy
    checks passed. Schedule a normal reboot at the user's chosen time. Run the same
    command with `--resume` after reboot. `complete` requires a new boot identity,
@@ -32,6 +39,13 @@ If there is no verified stable release descriptor, the operation stops before
 elevation or installation. The existing controlled-validation prerelease remains
 ineligible. The new native entry must be signed and packaged before this command
 can execute it. This source implementation does not declare a public release ready.
+
+New plans use `FalconProLifecyclePlan/v2` and bind the native architecture.
+Existing v1 plans are x64-only; revalidation is still required. Native PowerShell
+helpers use process-local `RemoteSigned`, in addition to explicit signature and
+publisher verification. They do not change the machine execution policy or
+suppress UAC. Program Files is resolved from the native registry, not caller
+environment variables.
 
 ## Four Clients
 
@@ -69,6 +83,18 @@ it does not sign policy, force-unload drivers, delete broken partial installatio
 or permit an arbitrary downgrade. `recovery_awaiting_reboot` requires another
 normal reboot and `--resume` before `rolled_back` can be returned.
 
+For an interrupted upgrade in `prepared`, `backup_ready` or `uninstall_pending`,
+explicit `--rollback --apply --approve` may return `cancelled_no_change` only
+after revalidating the old installation's protected paths, signatures, all
+payload hashes, live service/driver and fresh effective-policy snapshot. It
+does not stop or reinstall anything and does not count as installation success.
+It proves the old installation is intact now, not that no brief interruption
+occurred earlier. Missing/stopped components or uncertain policy still require
+diagnosis; absence alone never proves that product-authorized uninstall succeeded.
+Keep the downloaded release directory and approved plan until the transaction is
+closed, including a cancellation readback. Resume/recovery revalidates these signed
+inputs as well as protected transaction data; it does not trust the journal alone.
+
 The current public package uses an ordinary service. PPL upgrades are rejected
 before stopping protection; their service-internal uninstall transport still needs
 implementation/signing and separate native acceptance. Missing snapshot support,
@@ -89,11 +115,13 @@ are journaled before native invocation; only completed post-reboot verification
 records success. An uncertain elevated result is not reported as a definite
 failure. A full or unavailable metrics journal does not stop protection.
 
-`metrics ... prepare` returns the bounded minimal payload. The user's AI tool
-uploads it to the separately authorized Feishu table, reads it back, then calls
-`metrics ... ack --event-id <id> --receipt <rec-id>`. On uncertainty use `uncertain`
-and `recover`; do not resend automatically. The publisher has no built-in receiver
-or secret on the endpoint. Use one journal across AI tools to avoid multiple IDs.
+`metrics ... upload --cli <lark-cli> --base <base> --table <table>` previews a
+bounded minimal payload without reserving rows. After destination authorization,
+add `--apply` to upload, read back the exact fields and acknowledge each row.
+`prepare` and `ack` remain the manual connector handoff. On uncertainty use
+`uncertain` and `recover`; do not resend automatically. The publisher has no
+built-in receiver or secret on the endpoint. Use one journal across AI tools to
+avoid multiple IDs. See [INSTALL-METRICS.md](INSTALL-METRICS.md).
 
 `python falconpro.py statistics --input <authorized-export.json> --complete`
 aggregates consenting installation IDs, 7/30-day activity, versions, install
@@ -108,9 +136,18 @@ signatures. Drivers require Microsoft hardware and product signatures. Policy
 signing stays in the protected GitHub signing workflow. Do not reuse test-signed
 ARM64 files in a public release.
 
+The native ARM64 DLL also requires the verified Artifact Signing identity for
+normal integrity-enforced loading. Product signing alone is not evidence that
+the DLL can load. Validate signatures and actual loading with test signing off.
+
 Sign the onboarding PS1 files, then run `tools/build_release_bundle.py --package
 <verified-package> --signed-sources <signed-source-tree> --output <new-folder>
 --tag <immutable-tag>`. It creates exact-set archives and the unsigned data-only
 descriptor. Sign that descriptor last, then use `--verify --output <folder>`.
 Never normalize signed script bytes or execute the descriptor. Publication remains
 a separate reviewed action after same-candidate native and client acceptance.
+For ARM64 the descriptor is `FalconPro-release-arm64.ps1` and the package is
+`FalconPro-Windows11-arm64.zip`; verify with `--architecture arm64`. The x64
+descriptor remains `FalconPro-release.ps1`. Both platforms share an identical
+onboarding archive built from the same signed source tree. Do not substitute
+one platform's descriptor or runtime archive for the other.

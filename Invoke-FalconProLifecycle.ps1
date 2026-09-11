@@ -6,6 +6,7 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{32}$')][string]$TransactionId,
     [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{64}$')][string]$SourceManifestSha256,
     [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{64}$')][string]$ManifestSha256,
+    [Parameter(Mandatory)][ValidateSet('x64','arm64')][string]$ExpectedArchitecture,
     [Parameter(Mandatory)][string]$PackageRoot,
     [Parameter(Mandatory)][ValidatePattern('^S-1-5-21-[0-9-]+$')][string]$DeliveryUserSid,
     [switch]$Approve,
@@ -106,13 +107,14 @@ function Read-Package([string]$Root,[string]$Expected) {
     $bindings=@([regex]::Matches($text,'(?m)^# KPRO-MANIFEST-SHA256: ([A-Fa-f0-9]{64})\r?$'))
     if($bindings.Count -ne 1 -or $bindings[0].Groups[1].Value -ine $Expected){throw 'Attestation mismatch.'}
     $manifest=Decode $bytes
+    $layout=Get-KProPackageLayout -Architecture $ExpectedArchitecture
     if($manifest.schema -cne 'KProAlertRelease/v1' -or $manifest.releaseStatus -cne 'verified' -or
-        $manifest.platform -cne 'windows11-x64' -or $manifest.architecture -cne 'x64' -or
+        $manifest.platform -cne $layout.Platform -or $manifest.architecture -cne $ExpectedArchitecture -or
         $manifest.version -cnotmatch '^(0|[1-9][0-9]{0,4})(\.(0|[1-9][0-9]{0,4})){3}$'){throw 'Package release rejected.'}
     foreach($gate in @('serviceF1ArtifactProduct','driverMicrosoftProduct','dllProduct','policySignature','endToEnd','privateRawEventSpool')) {
         if($manifest.gates.$gate -isnot [bool] -or -not $manifest.gates.$gate){throw 'Release evidence incomplete.'}
     }
-    $names=@('KProSvc.exe','KProProtect.dll','KProFilter.sys','DrvCfg2.dat','default-policy.hex')
+    $names=@($layout.Service,$layout.Dll,$layout.Driver,'DrvCfg2.dat','default-policy.hex')
     if(@($manifest.files).Count -ne $names.Count){throw 'Package count mismatch.'}
     $seen=@{}
     foreach($entry in $manifest.files) {
@@ -121,8 +123,10 @@ function Read-Package([string]$Root,[string]$Expected) {
         $path=Join-Path $Root $entry.name
         $content=Read-Captured $path 67108864
         if($content.Length -ne $entry.size -or (Digest $content) -ine $entry.sha256){throw 'Package file mismatch.'}
-        if([IO.Path]::GetExtension($path) -in @('.exe','.dll','.sys') -and
-            (Get-AuthenticodeSignature -LiteralPath $path).Status -ne 'Valid'){throw 'Package signature invalid.'}
+        if([IO.Path]::GetExtension($path) -in @('.exe','.dll','.sys')) {
+            Assert-KProPeArchitecture -Bytes $content -Architecture $ExpectedArchitecture
+            if((Get-AuthenticodeSignature -LiteralPath $path).Status -ne 'Valid'){throw 'Package signature invalid.'}
+        }
     }
     return $manifest
 }
@@ -161,11 +165,43 @@ function Assert-OrdinaryService {
 }
 function Assert-Collector {
     $service=Get-CimInstance Win32_Service -Filter "Name='KProSvc'"
+    $driver=Get-Service KProFilter -ErrorAction Stop
     $health=Decode (Read-Captured (Join-Path $installed 'collector-health.json') 4096)
     $file=Get-Item -LiteralPath (Join-Path $installed 'collector-health.json')
-    if($service.State -ne 'Running' -or $health.schema -cne 'KProCollectorHealth/v1' -or
+    if($service.State -ne 'Running' -or $driver.Status -ne 'Running' -or $health.schema -cne 'KProCollectorHealth/v1' -or
        $health.status -ne 0 -or $health.stopped -ne $false -or $health.pid -ne $service.ProcessId -or
        $file.LastWriteTimeUtc -lt [DateTime]::UtcNow.AddSeconds(-60)){throw 'Fresh collector status missing.'}
+}
+function Cancel-UnchangedUpgrade {
+    if($state.operation -cne 'upgrade' -or
+       $state.phase -cnotin @('prepared','backup_ready','uninstall_pending','cancelled_no_change')) {
+        throw 'This state cannot be reconciled as an unchanged upgrade.'
+    }
+    Assert-OrdinaryService
+    Assert-Protected $installed
+    $currentHash=Digest (Read-Captured (Join-Path $installed 'release-manifest.json') 65536)
+    if($state.oldManifestSha256) {
+        if($state.oldManifestSha256 -cne $currentHash -or $state.policyDigest -cnotmatch '^[a-f0-9]{64}$') {
+            throw 'Old installation no longer matches the transaction.'
+        }
+    } elseif($state.phase -cne 'prepared') {throw 'Recovery binding is incomplete.'}
+    $old=Read-Package $installed $currentHash
+    $snapshot=Snapshot $currentHash $state.policyDigest
+    Assert-Collector
+    $state.oldManifestSha256=$currentHash
+    $state.policyDigest=$snapshot.digestSha256
+    $state.installedVersion=$old.version
+    Release-Files
+    # No stop, uninstall or reinstall occurs. This proves current integrity, not
+    # uninterrupted availability during an earlier uncertain uninstall attempt.
+    if($state.phase -cne 'cancelled_no_change'){Write-State 'cancelled_no_change'}
+}
+function Assert-RecoveryTargetAbsent {
+    $facts=& (Join-Path $sourceRoot 'plugins/kpro-alerts/scripts/EndpointFacts.ps1') | ConvertFrom-Json
+    if($facts.schema -cne 'FalconProEndpointFacts/v1' -or $facts.deviceId -cne $ExpectedDeviceId -or
+       $facts.architecture -cne $ExpectedArchitecture -or $facts.supported -ne $true -or
+       $facts.service -cne 'absent' -or $facts.driver -cne 'absent' -or
+       $facts.conflicts -ne $false -or $facts.residualFiles -ne $false) {throw 'Recovery target is not cleanly absent.'}
 }
 try {
     $principal=New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -180,7 +216,9 @@ try {
     if((Digest ([Text.Encoding]::UTF8.GetBytes('FalconPro-device-v1:'+$guid.ToLowerInvariant()))) -cne $ExpectedDeviceId){throw 'Device mismatch.'}
     $os=Get-CimInstance Win32_OperatingSystem
     $arch=@(Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Architecture -Unique)
-    if(-not [Environment]::Is64BitProcess -or $arch.Count -ne 1 -or $arch[0] -ne 9 -or $os.ProductType -ne 1 -or [int]$os.BuildNumber -lt 22000){throw 'Unsupported native platform.'}
+    if(-not [Environment]::Is64BitProcess -or $arch.Count -ne 1 -or $arch[0] -notin @(9,12) -or $os.ProductType -ne 1 -or [int]$os.BuildNumber -lt 22000){throw 'Unsupported native platform.'}
+    $nativeArchitecture=if($arch[0] -eq 12){'arm64'}else{'x64'}
+    if($nativeArchitecture -cne $ExpectedArchitecture){throw 'Native architecture differs from approved plan.'}
     $sourceBytes=Read-Captured (Join-Path $PSScriptRoot 'onboarding-source.json') 16384
     if((Digest $sourceBytes) -cne $SourceManifestSha256){throw 'Source manifest mismatch.'}
     $sourceManifest=Decode $sourceBytes
@@ -194,7 +232,13 @@ try {
         if((Digest $data) -cne $entry.sha256){throw 'Source hash mismatch.'}
         $sources[$entry.name]=$data
     }
+    if((Digest $sources['tools/KProReleaseTrust.psm1']) -cne 'd558a5f3acd31ce847e119bf00a7193711045d9f30add5d72305bce0bd7d3870'){throw 'Native trust module mismatch.'}
     Import-Module (Join-Path $PSScriptRoot 'tools/KProReleaseTrust.psm1') -Force
+    Assert-KProProgramFilesRoot $nativeProgramFiles
+    $descriptorBytes=Read-Captured (Join-Path (Split-Path $PSScriptRoot -Parent) 'FalconPro-release.ps1') 65536
+    $descriptor=Get-KProSignedReleaseDescriptor -Bytes $descriptorBytes
+    if($descriptor.sourceManifestSha256 -cne $SourceManifestSha256 -or $descriptor.packageManifestSha256 -cne $ManifestSha256 -or
+        $descriptor.platform -cne (Get-KProPackageLayout $ExpectedArchitecture).Platform){throw 'Native descriptor binding mismatch.'}
     $new=Read-Package $PackageRoot $ManifestSha256
     $installed=Join-Path $nativeProgramFiles 'KProAlert'
     $parent=Join-Path $nativeProgramFiles 'FalconProTransactions'
@@ -208,16 +252,27 @@ try {
         Release-Files
         if($state.schema -cne 'FalconProLifecycleResult/v1' -or $state.transactionId -cne $TransactionId -or
            $state.deviceId -cne $ExpectedDeviceId -or $state.manifestSha256 -cne $ManifestSha256 -or
-           $state.sourceManifestSha256 -cne $SourceManifestSha256 -or $state.deliveryUserSid -cne $DeliveryUserSid){throw 'Transaction mismatch.'}
+           $state.sourceManifestSha256 -cne $SourceManifestSha256 -or $state.deliveryUserSid -cne $DeliveryUserSid -or
+           $state.architecture -cne $ExpectedArchitecture){throw 'Transaction mismatch.'}
         $sourceRoot=Join-Path $transactionRoot 'onboarding'
         foreach($name in $names){Assert-Protected (Join-Path $sourceRoot $name)}
+        if($Mode -eq 'resume' -and $state.phase -ceq 'cancelled_no_change') {
+            Cancel-UnchangedUpgrade
+            $state|ConvertTo-Json -Depth 8 -Compress
+            return
+        }
         if($Mode -eq 'rollback') {
             if(-not $Apply -or -not $Approve){throw 'Explicit recovery approval required.'}
+            if($state.phase -cin @('prepared','backup_ready','uninstall_pending')) {
+                Cancel-UnchangedUpgrade
+                $state|ConvertTo-Json -Depth 8 -Compress
+                return
+            }
             if($state.oldManifestSha256 -cnotmatch '^[a-f0-9]{64}$' -or
                $state.phase -notin @('uninstalled','install_pending','awaiting_reboot')){throw 'Transaction not eligible for recovery.'}
             $recovery=Join-Path $transactionRoot 'recovery-package'
             Assert-Protected $recovery
-            $null=Read-Package $recovery $state.oldManifestSha256
+            $oldPackage=Read-Package $recovery $state.oldManifestSha256
             if(Get-Service KProSvc -ErrorAction SilentlyContinue) {
                 Assert-OrdinaryService
                 $null=Read-Package $installed $ManifestSha256
@@ -230,12 +285,16 @@ try {
             }
             if((Get-Service KProSvc,KProFilter -ErrorAction SilentlyContinue) -or (Test-Path -LiteralPath $installed)){throw 'Partial installation requires product recovery.'}
             Release-Files
+            Assert-RecoveryTargetAbsent
             Write-State 'recovery_install_pending'
-            $restored=& (Join-Path $sourceRoot 'Install-FalconPro.ps1') -ExpectedDeviceId $ExpectedDeviceId `
-                -SourceManifestSha256 $SourceManifestSha256 -PackageRoot $recovery -ManifestSha256 $state.oldManifestSha256 `
-                -DeliveryUserSid $DeliveryUserSid -ApproveInstallation -Apply -Confirm:$false | ConvertFrom-Json
+            # Recovery is already bound to this protected transaction's exact old
+            # package, not the new release descriptor used for initial installation.
+            $restored=& (Join-Path $sourceRoot 'Install-KProAlert.ps1') `
+                -PackageRoot $recovery -ManifestSha256 $state.oldManifestSha256 `
+                -DeliveryUserSid $DeliveryUserSid -Apply -Confirm:$false | ConvertFrom-Json
             if($restored.mode -cne 'service-running' -or $restored.collectorReady -ne $true){throw 'Recovery runtime failed.'}
             $null=Snapshot $state.oldManifestSha256 $state.policyDigest
+            $state.installedVersion=$oldPackage.version
             $state.bootIdentity=$os.LastBootUpTime.ToUniversalTime().ToString('o')
             Write-State 'recovery_awaiting_reboot'
             $state|ConvertTo-Json -Depth 8 -Compress
@@ -265,9 +324,10 @@ try {
         if((Get-FileHash -LiteralPath $path).Hash -ine (Digest $sources[$name])){throw 'Staged source mismatch.'}
     }
     [IO.File]::WriteAllBytes((Join-Path $sourceRoot 'onboarding-source.json'),$sourceBytes)
+    [IO.File]::WriteAllBytes((Join-Path $transactionRoot 'FalconPro-release.ps1'),$descriptorBytes)
     $state=[ordered]@{schema='FalconProLifecycleResult/v1';transactionId=$TransactionId;deviceId=$ExpectedDeviceId;
         sourceManifestSha256=$SourceManifestSha256;manifestSha256=$ManifestSha256;deliveryUserSid=$DeliveryUserSid;
-        operation=$Mode;version=$new.version;phase='prepared';updatedUtc='';oldManifestSha256='';policyDigest='';
+        operation=$Mode;version=$new.version;architecture=$ExpectedArchitecture;installedVersion=$new.version;phase='prepared';updatedUtc='';oldManifestSha256='';policyDigest='';
         bootIdentity=$os.LastBootUpTime.ToUniversalTime().ToString('o');evidenceDirectory='';recoveryEvidenceDirectory='';errorClass=''}
     Write-State 'prepared'
     Copy-Package $PackageRoot (Join-Path $transactionRoot 'package') $new

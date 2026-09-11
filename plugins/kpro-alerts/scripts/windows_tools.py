@@ -20,5 +20,5 @@ def native_tool(name):
     kernel.GetNativeSystemInfo.restype=None
     kernel.GetNativeSystemInfo(info)
     native_arch=int.from_bytes(info.raw[:2],'little')
-    system='Sysnative' if sys.maxsize<=2**32 and native_arch==9 else 'System32'
+    system='Sysnative' if sys.maxsize<=2**32 and native_arch in (9,12) else 'System32'
     return str(Path(root.value)/system/name)

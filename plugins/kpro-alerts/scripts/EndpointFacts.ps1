@@ -23,6 +23,11 @@ try {
     finally { $sha.Dispose() }
     $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
     $arch = @(Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -ExpandProperty Architecture -Unique)
+    $architecture = 'unknown'
+    if ($arch.Count -eq 1) {
+        if ([int]$arch[0] -eq 9) { $architecture = 'x64' }
+        elseif ([int]$arch[0] -eq 12) { $architecture = 'arm64' }
+    }
     $services = @(Get-CimInstance Win32_Service -Filter "Name='KProSvc' OR Name='KDirProSvc' OR Name='KCritDirCtrlSvc'" -ErrorAction Stop)
     $drivers = @(Get-CimInstance Win32_SystemDriver -Filter "Name='KProFilter'" -ErrorAction Stop)
     function Get-State($Items) {
@@ -33,14 +38,17 @@ try {
         if ($itemsArray[0].State -eq 'Stopped') { return 'stopped' }
         return 'unknown'
     }
+    $driverPaths = @(
+        [IO.Path]::GetFullPath((Join-Path $os.WindowsDirectory 'System32\drivers\KProFilter.sys'))
+        [IO.Path]::GetFullPath((Join-Path $os.WindowsDirectory 'System32\drivers\KProFilterArm.sys'))
+    )
     $residual = $false
-    foreach ($path in @((Join-Path $programFiles 'KProAlert'),
-        (Join-Path $os.WindowsDirectory 'System32\drivers\KProFilter.sys'))) {
+    foreach ($path in @((Join-Path $programFiles 'KProAlert')) + $driverPaths) {
         if (Test-Path -LiteralPath $path -ErrorAction Stop) { $residual = $true }
     }
-    [ordered]@{schema='FalconProEndpointFacts/v1'; deviceId=$device;
+    [ordered]@{schema='FalconProEndpointFacts/v1'; deviceId=$device; architecture=$architecture;
         supported=([int]$os.ProductType -eq 1 -and [int]$os.BuildNumber -ge 22000 -and
-            $arch.Count -eq 1 -and [int]$arch[0] -eq 9);
+            $architecture -in @('x64','arm64'));
         service=(Get-State @($services | Where-Object Name -eq 'KProSvc'));
         driver=(Get-State $drivers);
         conflicts=(@($services | Where-Object Name -ne 'KProSvc').Count -ne 0);

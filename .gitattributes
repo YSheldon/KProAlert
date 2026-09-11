@@ -1,3 +1,2 @@
-# This unsigned module is byte-bound by the native helper. Signed PS1 assets
-# are release artifacts and must not be normalized by this rule.
-/tools/KProReleaseTrust.psm1 text eol=lf
+# Native entries pin the exact verifier bytes across developer and signing checkouts.
+tools/KProReleaseTrust.psm1 -text
