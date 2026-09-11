@@ -23,6 +23,16 @@ class ServiceInstallTests(unittest.TestCase):
         self.assertNotIn("@('create','KProSvc'", source)
         self.assertIn('New-KProProtectionService $serviceExe', source)
 
+    def test_install_root_owner_and_readback_precede_payload_copy(self):
+        source = (ROOT / 'Install-KProAlert.ps1').read_text(encoding='utf-8-sig')
+        start = source.index('$acl = New-Object Security.AccessControl.DirectorySecurity')
+        end = source.index('foreach ($entry in $manifest.files)', start)
+        block = source[start:end]
+        self.assertIn("$acl.SetOwner((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')))", block)
+        self.assertLess(block.index('$acl.SetOwner('), block.index('Set-Acl -LiteralPath $destination'))
+        self.assertLess(block.index('Set-Acl -LiteralPath $destination'),
+                        block.index('Assert-KProInstallRootAcl (Get-Acl -LiteralPath $destination) $DeliveryUserSid'))
+
     @unittest.skipUnless(sys.platform == 'win32', 'Windows PowerShell contract')
     def test_quoted_path_and_readback(self):
         result = subprocess.run(
