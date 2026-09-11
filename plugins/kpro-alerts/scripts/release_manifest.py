@@ -2,8 +2,9 @@
 import hashlib
 import re
 from pathlib import Path
+from release_platforms import layout, required_files
 
-REQUIRED = {'KProSvc.exe', 'KProProtect.dll', 'KProFilter.sys', 'DrvCfg2.dat', 'default-policy.hex'}
+REQUIRED = required_files('x64')
 GATES = {'serviceF1ArtifactProduct', 'driverMicrosoftProduct', 'dllProduct',
          'policySignature', 'endToEnd', 'privateRawEventSpool'}
 
@@ -11,7 +12,9 @@ GATES = {'serviceF1ArtifactProduct', 'driverMicrosoftProduct', 'dllProduct',
 def validate(manifest, root, architecture):
     if manifest.get('schema') != 'KProAlertRelease/v1' or manifest.get('releaseStatus') != 'verified':
         raise ValueError('unverified release manifest')
-    if architecture != 'x64' or manifest.get('architecture') != architecture or manifest.get('platform') != 'windows11-x64':
+    target = layout(architecture)
+    required = required_files(architecture)
+    if manifest.get('architecture') != architecture or manifest.get('platform') != target['platform']:
         raise ValueError('package architecture mismatch')
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?', str(manifest.get('version'))):
         raise ValueError('invalid release version')
@@ -19,13 +22,13 @@ def validate(manifest, root, architecture):
     if any(gates.get(k) is not True for k in GATES):
         raise ValueError('release evidence gates incomplete')
     files = manifest.get('files')
-    if not isinstance(files, list) or len(files) != len(REQUIRED):
+    if not isinstance(files, list) or len(files) != len(required):
         raise ValueError('unexpected package file count')
     root = Path(root).resolve(strict=True)
     seen = set()
     for entry in files:
         name = entry.get('name')
-        if name not in REQUIRED or name in seen:
+        if name not in required or name in seen:
             raise ValueError('unexpected or duplicate filename')
         seen.add(name)
         path = root/name

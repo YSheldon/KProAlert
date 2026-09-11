@@ -4,12 +4,19 @@ No binary release is published until all gates pass. The public installer must
 consume an immutable versioned release and a trusted expected manifest SHA-256,
 not a mutable latest URL or file-supplied checksum alone.
 
-The first preview is restricted to Windows 11 x64 workstations (not ARM64 or
-Windows Server). Its manifest must declare platform=windows11-x64. The initial
-native architecture package has exactly five payload files:
-KProSvc.exe, KProProtect.dll, KProFilter.sys, DrvCfg2.dat, default-policy.hex.
-The x86/x64 release archives normalize basenames for the selected native host.
-Do not install the x86 driver on an x64 host. Unsupported host matrices fail closed.
+The already published validation preview is Windows 11 x64 only. The current
+installer source additionally supports Windows 11 ARM64 workstations, subject to
+its own signed release and native acceptance. Windows Server and x86 are not
+admitted by this public entry. Each native package has exactly five payload files:
+
+| Architecture | Platform | Native payloads | Shared signed data |
+| --- | --- | --- | --- |
+| x64 | windows11-x64 | KProSvc.exe, KProProtect.dll, KProFilter.sys | DrvCfg2.dat, default-policy.hex |
+| arm64 | windows11-arm64 | KProSvcArm.exe, KProProtectArm.dll, KProFilterArm.sys | DrvCfg2.dat, default-policy.hex |
+
+The actual CPU, descriptor, manifest and PE Machine must agree. ARM names remain
+distinct even when packages are staged in adjacent directories. Unsupported host
+matrices fail closed; emulated Python/PowerShell does not select x64 drivers on ARM.
 
 KProAlertRelease/v1 records version, architecture, releaseStatus=verified and
 files (name, SHA256, size). gates records completed release evidence for:

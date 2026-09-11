@@ -12,6 +12,7 @@ from endpoint import probe
 from release_download import acquire, version_tuple
 from release_manifest import validate
 from windows_tools import native_tool
+from release_platforms import layout
 
 
 def verify_descriptor(data):
@@ -20,7 +21,7 @@ def verify_descriptor(data):
         path=Path(folder)/'descriptor.ps1'
         path.write_bytes(data)
         result=subprocess.run([native_tool('WindowsPowerShell/v1.0/powershell.exe'),
-            '-NoProfile','-NonInteractive','-File',str(Path(__file__).with_name('Verify-ReleaseDescriptor.ps1')),
+            '-NoProfile','-NonInteractive','-ExecutionPolicy','RemoteSigned','-File',str(Path(__file__).with_name('Verify-ReleaseDescriptor.ps1')),
             '-DescriptorPath',str(path)],capture_output=True,text=True,timeout=45)
     if result.returncode or len(result.stdout)>100000:raise ValueError('Windows descriptor signature verification failed')
     reply=json.loads(result.stdout.lstrip('\ufeff'))
@@ -42,15 +43,19 @@ def prepare(destination,expected_device_id,*,endpoint_probe=probe,download=acqui
     if endpoint['state']!='not_installed':
         return dict(state=endpoint['state'],installPerformed=False,
                     nextStep='Confirm the actual local device or diagnose existing protection; do not reinstall')
-    descriptor=download(destination,verify_descriptor)
+    architecture=endpoint.get('architecture')
+    target=layout(architecture)
+    descriptor=download(destination,verify_descriptor,platform=target['platform'])
     root=Path(destination)
     manifest=json.loads((root/'package/release-manifest.json').read_text(encoding='utf-8-sig'))
-    validate(manifest,root/'package','x64')
+    validate(manifest,root/'package',architecture)
+    if descriptor['platform']!=target['platform']:
+        raise ValueError('Descriptor/endpoint architecture mismatch')
     if version_tuple(manifest['version'])!=version_tuple(descriptor['version']):
         raise ValueError('Descriptor/package version mismatch')
     sid=sid_reader()
     return dict(schema='FalconProBootstrapPlan/v1',state='ready_for_native_plan',
-        deviceId=endpoint['deviceId'],version=descriptor['version'],installPerformed=False,
+        deviceId=endpoint['deviceId'],architecture=architecture,version=descriptor['version'],installPerformed=False,
         requiresAdministrator=True,requiresExplicitApproval=True,requiresProtectedStaging=True,
         command=[str(root/'onboarding/Install-FalconPro.ps1'),'-ExpectedDeviceId',endpoint['deviceId'],
                  '-SourceManifestSha256',descriptor['sourceManifestSha256'],

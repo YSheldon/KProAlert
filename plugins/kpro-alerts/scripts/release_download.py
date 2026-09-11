@@ -9,12 +9,13 @@ import urllib.request
 import zipfile
 import os
 from spool import checked
+from release_platforms import architecture_for, layout, required_files
 
 
 API='https://api.github.com/repos/YSheldon/KProAlert/releases/latest'
 PREFIX='/YSheldon/KProAlert/releases/download/'
-PACKAGE={'KProSvc.exe','KProProtect.dll','KProFilter.sys','DrvCfg2.dat','default-policy.hex',
-         'release-manifest.json','release-attestation.ps1'}
+PACKAGE_METADATA={'release-manifest.json','release-attestation.ps1'}
+PACKAGE=required_files('x64')|PACKAGE_METADATA
 ONBOARDING={'Install-FalconPro.ps1','Install-KProAlert.ps1','onboarding-source.json',
             'plugins/kpro-alerts/scripts/EndpointFacts.ps1','tools/KProReleaseTrust.psm1'}
 LIFECYCLE_ONBOARDING=ONBOARDING|{'Invoke-FalconProLifecycle.ps1','Uninstall-KProAlert.ps1',
@@ -51,7 +52,8 @@ def validate_descriptor(value):
     if not isinstance(value,dict) or set(value)!=keys or value['schema']!='FalconProReleaseDescriptor/v1':
         raise ValueError('Unsupported release descriptor')
     version_tuple(value['version'])
-    if value['platform']!='windows11-x64' or value['releaseStatus']!='verified':
+    architecture_for(value['platform'])
+    if value['releaseStatus']!='verified':
         raise ValueError('No verified supported release')
     for key in ('packageManifestSha256','sourceManifestSha256'):
         if not isinstance(value[key],str) or not re.fullmatch('[a-f0-9]{64}',value[key]):
@@ -126,8 +128,10 @@ def unpack(archive,target,allowed):
                 if source.read(1):raise ValueError('Archive entry size changed')
 
 
-def acquire(destination,verify_descriptor,*,fetch=read_url):
+def acquire(destination,verify_descriptor,*,fetch=read_url,platform='windows11-x64'):
     if elevated():raise ValueError('Download staging must run without elevation')
+    architecture=architecture_for(platform)
+    target_layout=layout(architecture)
     destination=Path(destination)
     checked(destination.parent)
     if destination.exists():raise FileExistsError('Use a new staging directory')
@@ -136,11 +140,13 @@ def acquire(destination,verify_descriptor,*,fetch=read_url):
         raise ValueError('Only a stable published release can be discovered')
     assets=release.get('assets')
     if not isinstance(assets,list) or len(assets)>100:raise ValueError('Release asset list invalid')
-    descriptor=[a for a in assets if a.get('name')=='FalconPro-release.ps1']
+    descriptor=[a for a in assets if a.get('name')==target_layout['descriptor']]
     if len(descriptor)!=1:raise ValueError('Verified release descriptor is not published')
     data=fetch(allowed_url(descriptor[0]['browser_download_url']),65536)
     # Windows publisher verification must precede decoding/trusting any asset URL.
     verified=validate_descriptor(verify_descriptor(data))
+    if verified['platform']!=platform:
+        raise ValueError('Signed release does not match the bound endpoint architecture')
     tag=release.get('tag_name')
     if not isinstance(tag,str) or not re.fullmatch('[A-Za-z0-9_-][A-Za-z0-9._-]*',tag):
         raise ValueError('Invalid discovered release tag')
@@ -149,7 +155,7 @@ def acquire(destination,verify_descriptor,*,fetch=read_url):
             not urlsplit(a['url']).path.startswith(expected_prefix) for a in verified['assets'].values()):
         raise ValueError('Descriptor/assets do not belong to the discovered release tag')
     destination.mkdir(parents=False)
-    for kind,allowed in (('package',PACKAGE),('onboarding',ONBOARDING)):
+    for kind,allowed in (('package',required_files(architecture)|PACKAGE_METADATA),('onboarding',ONBOARDING)):
         asset=verified['assets'][kind]
         payload=fetch(asset['url'],asset['size'])
         if len(payload)!=asset['size'] or hashlib.sha256(payload).hexdigest()!=asset['sha256']:

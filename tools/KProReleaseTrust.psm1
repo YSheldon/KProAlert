@@ -86,4 +86,70 @@ function Assert-KProReleaseAttestation {
     return Assert-KProReleasePublisher -Signature $signature
 }
 
-Export-ModuleMember -Function Assert-KProReleaseAttestation,ConvertFrom-KProAttestationText
+function Get-KProPackageLayout {
+    param([Parameter(Mandatory)][ValidateSet('x64','arm64')][string]$Architecture)
+    if ($Architecture -eq 'arm64') {
+        return @{Platform='windows11-arm64';Service='KProSvcArm.exe';Dll='KProProtectArm.dll';Driver='KProFilterArm.sys';Machine=0xaa64}
+    }
+    return @{Platform='windows11-x64';Service='KProSvc.exe';Dll='KProProtect.dll';Driver='KProFilter.sys';Machine=0x8664}
+}
+
+function Assert-KProPeArchitecture {
+    param([Parameter(Mandatory)][byte[]]$Bytes,[Parameter(Mandatory)][ValidateSet('x64','arm64')][string]$Architecture)
+    if ($Bytes.Length -lt 64 -or $Bytes[0] -ne 0x4d -or $Bytes[1] -ne 0x5a) { throw 'Invalid PE header.' }
+    $offset=[BitConverter]::ToInt32($Bytes,60)
+    if ($offset -lt 64 -or $offset -gt $Bytes.Length-26 -or
+        [BitConverter]::ToUInt32($Bytes,$offset) -ne 0x4550 -or
+        [BitConverter]::ToUInt16($Bytes,$offset+24) -ne 0x20b) { throw 'Invalid PE layout.' }
+    $layout=Get-KProPackageLayout $Architecture
+    if ([BitConverter]::ToUInt16($Bytes,$offset+4) -ne $layout.Machine) { throw 'PE architecture does not match native endpoint.' }
+}
+
+function Get-KProSignedReleaseDescriptor {
+    param([Parameter(Mandatory)][byte[]]$Bytes)
+    $null=Assert-KProReleaseAttestation -Bytes $Bytes
+    $text=ConvertFrom-KProAttestationText -Bytes $Bytes
+    $markers=@([regex]::Matches($text,'(?m)^# FALCONPRO-RELEASE-JSON: ([A-Za-z0-9+/=]+)\r?$'))
+    if ($markers.Count -ne 1) { throw 'Exactly one signed descriptor payload required.' }
+    $utf8=New-Object Text.UTF8Encoding($false,$true)
+    $descriptor=$utf8.GetString([Convert]::FromBase64String($markers[0].Groups[1].Value)) | ConvertFrom-Json
+    if ($descriptor.schema -cne 'FalconProReleaseDescriptor/v1' -or $descriptor.releaseStatus -cne 'verified' -or
+        $descriptor.platform -cnotin @('windows11-x64','windows11-arm64') -or
+        $descriptor.sourceManifestSha256 -cnotmatch '^[a-f0-9]{64}$' -or
+        $descriptor.packageManifestSha256 -cnotmatch '^[a-f0-9]{64}$') { throw 'Invalid admitted descriptor.' }
+    return $descriptor
+}
+
+function Get-KProNativeProgramFiles {
+    $base=[Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine','Registry64')
+    try {
+        $key=$base.OpenSubKey('SOFTWARE\Microsoft\Windows\CurrentVersion')
+        if ($null -eq $key) { throw 'Native Program Files registry key is missing.' }
+        try { $path=[string]$key.GetValue('ProgramFilesDir') } finally { $key.Dispose() }
+    } finally { $base.Dispose() }
+    if ($path -notmatch '^[A-Za-z]:\\') { throw 'Native Program Files path is invalid.' }
+    return [IO.Path]::GetFullPath($path).TrimEnd('\')
+}
+
+function Assert-KProProgramFilesRoot {
+    param([Parameter(Mandatory)][string]$Path)
+    $item=Get-Item -LiteralPath $Path -Force
+    if ($item -isnot [IO.DirectoryInfo] -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Native Program Files is not a plain directory.' }
+    $acl=Get-Acl -LiteralPath $Path
+    $raw=New-Object Security.AccessControl.RawSecurityDescriptor($acl.GetSecurityDescriptorBinaryForm(),0)
+    if ($null -eq $raw.DiscretionaryAcl) { throw 'Native Program Files DACL is missing.' }
+    $installer=New-Object Security.Principal.NTAccount('NT SERVICE','TrustedInstaller')
+    $trusted=@('S-1-5-18','S-1-5-32-544',$installer.Translate([Security.Principal.SecurityIdentifier]).Value)
+    if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin $trusted) { throw 'Native Program Files owner is untrusted.' }
+    $write=[Security.AccessControl.FileSystemRights]::Write -bor [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
+    foreach ($rule in $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])) {
+        if ($rule.PropagationFlags -band [Security.AccessControl.PropagationFlags]::InheritOnly) { continue }
+        if ($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $write) -ne 0 -and $rule.IdentityReference.Value -notin $trusted) {
+            throw 'Native Program Files is writable by an untrusted principal.'
+        }
+    }
+}
+
+Export-ModuleMember -Function Assert-KProReleaseAttestation,ConvertFrom-KProAttestationText,Get-KProPackageLayout,Assert-KProPeArchitecture,Get-KProSignedReleaseDescriptor,Get-KProNativeProgramFiles,Assert-KProProgramFilesRoot

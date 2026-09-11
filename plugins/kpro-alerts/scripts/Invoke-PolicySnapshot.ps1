@@ -95,7 +95,7 @@ try {
     $principal=New-Object Security.Principal.WindowsPrincipal($identity)
     if(-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) -or
         -not [Environment]::Is64BitOperatingSystem -or -not [Environment]::Is64BitProcess) {
-        throw 'Elevated native x64 execution required.'
+        throw 'Elevated 64-bit Windows execution required.'
     }
     $base=[Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine','Registry64')
     try {
@@ -112,7 +112,11 @@ try {
     Assert-ProgramFilesAcl
     Assert-ProtectedPath $PSCommandPath
     $root=Join-Path $programFiles 'KProAlert'
-    $exe=Join-Path $root 'KProSvc.exe'
+    $cpus=@(Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Architecture -Unique)
+    if($cpus.Count -ne 1 -or $cpus[0] -notin @(9,12)){throw 'Unsupported native architecture.'}
+    $architecture=if($cpus[0] -eq 12){'arm64'}else{'x64'}
+    $serviceName=if($architecture -eq 'arm64'){'KProSvcArm.exe'}else{'KProSvc.exe'}
+    $exe=Join-Path $root $serviceName
     $service=Get-CimInstance Win32_Service -Filter "Name='KProSvc'"
     if($null -eq $service -or $service.State -ne 'Running' -or $service.ProcessId -eq 0 -or
         $service.StartName -ne 'LocalSystem' -or $service.PathName -cne ('"'+$exe+'"')) {
@@ -123,10 +127,11 @@ try {
     $module=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../tools/KProReleaseTrust.psm1'))
     $moduleBytes=Read-Locked $module 65536
     # Bound helper dependency; updating it requires a new reviewed/signed helper.
-    if((Get-Digest $moduleBytes) -cne 'f2f02c4e866b19fe5c1c2e7fd4e483b4b604888fcae429d5049ef1dff650ac43') {
+    if((Get-Digest $moduleBytes) -cne 'd558a5f3acd31ce847e119bf00a7193711045d9f30add5d72305bce0bd7d3870') {
         throw 'Native trust module mismatch.'
     }
     Import-Module $module -Force
+    $layout=Get-KProPackageLayout -Architecture $architecture
     $attestation=Read-Locked (Join-Path $root 'release-attestation.ps1') 65536
     $null=Assert-KProReleaseAttestation -Bytes $attestation
     $text=ConvertFrom-KProAttestationText -Bytes $attestation
@@ -134,14 +139,14 @@ try {
     if($bindings.Count -ne 1 -or $bindings[0].Groups[1].Value -ne $ManifestSha256){throw 'Attestation binding mismatch.'}
     $manifest=[Text.Encoding]::UTF8.GetString($manifestBytes).TrimStart([char]0xfeff)|ConvertFrom-Json
     if($manifest.schema -cne 'KProAlertRelease/v1' -or $manifest.releaseStatus -cne 'verified' -or
-        $manifest.platform -cne 'windows11-x64' -or $manifest.architecture -cne 'x64') {
+        $manifest.platform -cne $layout.Platform -or $manifest.architecture -cne $architecture) {
         throw 'Installed package is not an admitted release.'
     }
     foreach($gate in @('serviceF1ArtifactProduct','driverMicrosoftProduct','dllProduct','policySignature',
                        'endToEnd','privateRawEventSpool')) {
         if($manifest.gates.$gate -isnot [bool] -or $manifest.gates.$gate -ne $true){throw 'Installed release gate missing.'}
     }
-    $names=@('KProSvc.exe','KProProtect.dll','KProFilter.sys','DrvCfg2.dat','default-policy.hex')
+    $names=@($layout.Service,$layout.Dll,$layout.Driver,'DrvCfg2.dat','default-policy.hex')
     if(@($manifest.files).Count -ne $names.Count){throw 'Invalid release file count.'}
     $seen=@{}
     foreach($file in $manifest.files) {

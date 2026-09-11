@@ -11,6 +11,21 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$inputHandles=New-Object 'System.Collections.Generic.List[System.IDisposable]'
+
+function Read-LockedInput([string]$Path,[int]$Maximum) {
+    $stream=[IO.File]::Open($Path,'Open','Read','Read')
+    $inputHandles.Add($stream)
+    if($stream.Length -le 0 -or $stream.Length -gt $Maximum){throw 'Input size rejected.'}
+    $bytes=New-Object byte[] ([int]$stream.Length)
+    $position=0
+    while($position -lt $bytes.Length) {
+        $count=$stream.Read($bytes,$position,$bytes.Length-$position)
+        if($count -eq 0){throw 'Short input read.'}
+        $position+=$count
+    }
+    return ,$bytes
+}
 
 function Assert-SourceFiles {
     # Bootstrap independently verifies this entry script before execution.
@@ -20,7 +35,7 @@ function Assert-SourceFiles {
         ($manifestItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
         throw 'Invalid onboarding source manifest.'
     }
-    $manifestBytes = [IO.File]::ReadAllBytes($manifestPath)
+    $manifestBytes = Read-LockedInput $manifestPath 16384
     if ($manifestBytes.Length -gt 16384) { throw 'Source manifest is too large.' }
     $sha = [Security.Cryptography.SHA256]::Create()
     try { $digest = ([BitConverter]::ToString($sha.ComputeHash($manifestBytes))).Replace('-','') }
@@ -50,13 +65,25 @@ function Assert-SourceFiles {
             if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse source is not accepted.' }
             if ($item -is [IO.FileInfo]) { $item = $item.Directory } else { $item = $item.Parent }
         }
-        if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $entry.sha256) {
+        $captured=Read-LockedInput $path 1048576
+        $sha=[Security.Cryptography.SHA256]::Create()
+        try{$digest=([BitConverter]::ToString($sha.ComputeHash($captured))).Replace('-','')}
+        finally{$sha.Dispose()}
+        if ($digest -ne $entry.sha256) {
             throw 'Onboarding source hash mismatch; execute no helpers.'
         }
     }
+    $trustModule=Join-Path $PSScriptRoot 'tools/KProReleaseTrust.psm1'
+    if ((Get-FileHash -LiteralPath $trustModule).Hash -ine 'd558a5f3acd31ce847e119bf00a7193711045d9f30add5d72305bce0bd7d3870') {
+        throw 'Native trust module mismatch.'
+    }
+    Import-Module $trustModule -Force
+    $descriptorPath=Join-Path (Split-Path $PSScriptRoot -Parent) 'FalconPro-release.ps1'
+    $descriptor=Get-KProSignedReleaseDescriptor -Bytes (Read-LockedInput $descriptorPath 65536)
+    if ($descriptor.sourceManifestSha256 -ine $SourceManifestSha256 -or
+        $descriptor.packageManifestSha256 -ine $ManifestSha256) { throw 'Sources and package are not bound by the signed descriptor.' }
+    $script:approvedDescriptor=$descriptor
 }
-Assert-SourceFiles
-
 function Assert-TargetAbsent {
     $facts = (& (Join-Path $PSScriptRoot 'plugins\kpro-alerts\scripts\EndpointFacts.ps1')) | ConvertFrom-Json
     if ($facts.schema -cne 'FalconProEndpointFacts/v1' -or
@@ -69,6 +96,8 @@ function Assert-TargetAbsent {
 }
 
 # No target is selected by a cloud model, hostname guess or alert payload.
+try {
+Assert-SourceFiles
 Assert-TargetAbsent
 $installArgs = @{PackageRoot=$PackageRoot; ManifestSha256=$ManifestSha256; DeliveryUserSid=$DeliveryUserSid}
 $installer = Join-Path $PSScriptRoot 'Install-KProAlert.ps1'
@@ -76,6 +105,10 @@ $installer = Join-Path $PSScriptRoot 'Install-KProAlert.ps1'
 $plan = (& $installer @installArgs) | ConvertFrom-Json
 if ($plan.mode -cne 'verified-plan' -or $plan.candidateValidation -ne $false) {
     throw 'Only an admitted production release can be offered for installation.'
+}
+if ($plan.version -cne $approvedDescriptor.version -or
+    ('windows11-'+$plan.architecture) -cne $approvedDescriptor.platform) {
+    throw 'Installation version/platform differs from the approved descriptor.'
 }
 if (-not $Apply) {
     [ordered]@{schema='FalconProInstallPlan/v1'; deviceId=$ExpectedDeviceId;
@@ -94,3 +127,6 @@ if (-not $PSCmdlet.ShouldProcess($ExpectedDeviceId, "Install FalconPro package $
 Assert-SourceFiles
 Assert-TargetAbsent
 & $installer @installArgs -Apply
+} finally {
+    foreach($handle in $inputHandles){$handle.Dispose()}
+}

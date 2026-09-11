@@ -92,16 +92,32 @@ class Journal:
                 (event['eventId'],json.dumps(event,sort_keys=True),dedupe,'pending'))
             return event
 
-    def prepare(self,limit=50):
+    @staticmethod
+    def _validate_batch_limit(limit):
         if type(limit) is not int or not 1<=limit<=50:
             raise ValueError('Bounded upload batch required')
+
+    def _pending_events(self, limit):
+        if not self._identity():
+            return [], []
+        rows=self.db.execute(
+            "SELECT id,substr(payload,1,4097) FROM metrics_events "
+            "WHERE state='pending' ORDER BY rowid LIMIT ?", (limit,)).fetchall()
+        return [self._validated(*row) for row in rows], rows
+
+    def preview(self, limit=50):
+        """Return pending events without changing their delivery state."""
+        self._validate_batch_limit(limit)
+        events, _ = self._pending_events(limit)
+        return events
+
+    def prepare(self,limit=50):
+        self._validate_batch_limit(limit)
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
-            if not self._identity():
-                return []
-            rows=self.db.execute("SELECT id,substr(payload,1,4097) FROM metrics_events WHERE state='pending' ORDER BY rowid LIMIT ?",(limit,)).fetchall()
-            events=[self._validated(*row) for row in rows]
-            self.db.executemany("UPDATE metrics_events SET state='prepared' WHERE id=?",[(r[0],) for r in rows])
+            events, rows = self._pending_events(limit)
+            self.db.executemany("UPDATE metrics_events SET state='prepared' WHERE id=?",
+                                [(r[0],) for r in rows])
             return events
 
     def ack(self,event_id,receipt):

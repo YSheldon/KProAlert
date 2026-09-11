@@ -33,6 +33,45 @@ class DownloadTests(unittest.TestCase):
             d=descriptor();d[field]=value
             with self.assertRaises(ValueError):validate_descriptor(d)
 
+    def test_arm64_download_selects_its_signed_descriptor_and_exact_files(self):
+        from release_download import API, LIFECYCLE_ONBOARDING
+        def packed(files):
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, 'w') as z:
+                for name, data in files.items(): z.writestr(name, data)
+            return output.getvalue()
+        package_names = {'KProSvcArm.exe','KProProtectArm.dll','KProFilterArm.sys',
+                         'DrvCfg2.dat','default-policy.hex','release-manifest.json','release-attestation.ps1'}
+        package = {name: b'fixture' for name in package_names}
+        onboarding = {name: b'fixture' for name in LIFECYCLE_ONBOARDING}
+        arm = descriptor()
+        arm['platform'] = 'windows11-arm64'
+        arm['packageManifestSha256'] = hashlib.sha256(package['release-manifest.json']).hexdigest()
+        arm['sourceManifestSha256'] = hashlib.sha256(onboarding['onboarding-source.json']).hexdigest()
+        payloads = {BASE+'package.zip': packed(package), BASE+'onboarding.zip': packed(onboarding)}
+        for asset in arm['assets'].values():
+            data = payloads[asset['url']]
+            asset.update(size=len(data),sha256=hashlib.sha256(data).hexdigest())
+        release = dict(draft=False, prerelease=False, tag_name='v1.2.0.300', assets=[
+            dict(name='FalconPro-release.ps1', browser_download_url=BASE+'FalconPro-release.ps1'),
+            dict(name='FalconPro-release-arm64.ps1', browser_download_url=BASE+'FalconPro-release-arm64.ps1')])
+        payloads[API] = json.dumps(release).encode()
+        payloads[BASE+'FalconPro-release-arm64.ps1'] = b'arm-signed'
+        verify = Mock(return_value=arm)
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder)/'release'
+            result = acquire(target, verify, fetch=lambda url, _:payloads[url], platform='windows11-arm64')
+            self.assertEqual(result['platform'], 'windows11-arm64')
+            verify.assert_called_once_with(b'arm-signed')
+            self.assertTrue((target/'package/KProFilterArm.sys').is_file())
+            self.assertFalse((target/'package/KProFilter.sys').exists())
+        with tempfile.TemporaryDirectory() as folder:
+            wrong = descriptor()
+            with self.assertRaises(ValueError):
+                acquire(Path(folder)/'release', lambda _: wrong,
+                        fetch=lambda url, _:payloads[url], platform='windows11-arm64')
+            self.assertFalse((Path(folder)/'release').exists())
+
     def test_urls_cannot_escape_release_origin(self):
         for url in ('http://github.com/YSheldon/KProAlert/releases/download/v1/a.zip',
                     'https://github.com/other/repo/releases/download/v1/a.zip',
