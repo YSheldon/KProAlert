@@ -74,7 +74,7 @@ function Assert-SourceFiles {
         }
     }
     $trustModule=Join-Path $PSScriptRoot 'tools/KProReleaseTrust.psm1'
-    if ((Get-FileHash -LiteralPath $trustModule).Hash -ine 'd558a5f3acd31ce847e119bf00a7193711045d9f30add5d72305bce0bd7d3870') {
+    if ((Get-FileHash -LiteralPath $trustModule).Hash -ine '979c2d8cfd7e19317ae8e5752bad59f6431ac92d69777b5661b27ed7e1dd2639') {
         throw 'Native trust module mismatch.'
     }
     Import-Module $trustModule -Force

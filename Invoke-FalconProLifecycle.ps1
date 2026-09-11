@@ -10,6 +10,9 @@ param(
     [Parameter(Mandatory)][string]$PackageRoot,
     [Parameter(Mandatory)][ValidatePattern('^S-1-5-21-[0-9-]+$')][string]$DeliveryUserSid,
     [switch]$Approve,
+    [string]$CandidatePermitPath,
+    [ValidatePattern('^[a-f0-9]{64}$')][string]$CandidatePermitSha256,
+    [switch]$ApproveCandidateValidation,
     [switch]$Apply
 )
 Set-StrictMode -Version Latest
@@ -18,6 +21,11 @@ $held=New-Object 'System.Collections.Generic.List[System.IDisposable]'
 $transactionLock=$null
 $state=$null
 $transactionRoot=$null
+$candidatePermit=$null
+$candidateValidation=[bool]($CandidatePermitPath -or $CandidatePermitSha256 -or $ApproveCandidateValidation)
+if($candidateValidation -and (-not $CandidatePermitPath -or -not $CandidatePermitSha256 -or -not $ApproveCandidateValidation)) {
+    throw 'Explicit candidate permit and validation approval required.'
+}
 
 function Read-Captured([string]$Path,[int]$Maximum) {
     $item=Get-Item -LiteralPath $Path -Force
@@ -108,10 +116,12 @@ function Read-Package([string]$Root,[string]$Expected) {
     if($bindings.Count -ne 1 -or $bindings[0].Groups[1].Value -ine $Expected){throw 'Attestation mismatch.'}
     $manifest=Decode $bytes
     $layout=Get-KProPackageLayout -Architecture $ExpectedArchitecture
-    if($manifest.schema -cne 'KProAlertRelease/v1' -or $manifest.releaseStatus -cne 'verified' -or
+    if($manifest.schema -cne 'KProAlertRelease/v1' -or ($manifest.releaseStatus -cne 'verified' -and -not $candidateValidation) -or
         $manifest.platform -cne $layout.Platform -or $manifest.architecture -cne $ExpectedArchitecture -or
         $manifest.version -cnotmatch '^(0|[1-9][0-9]{0,4})(\.(0|[1-9][0-9]{0,4})){3}$'){throw 'Package release rejected.'}
+    if($candidateValidation){Assert-KProCandidatePackage $candidatePermit $manifest $Expected (Digest $attestation)}
     foreach($gate in @('serviceF1ArtifactProduct','driverMicrosoftProduct','dllProduct','policySignature','endToEnd','privateRawEventSpool')) {
+        if($candidateValidation -and $manifest.releaseStatus -ceq 'candidate' -and $gate -ceq 'endToEnd'){continue}
         if($manifest.gates.$gate -isnot [bool] -or -not $manifest.gates.$gate){throw 'Release evidence incomplete.'}
     }
     $names=@($layout.Service,$layout.Dll,$layout.Driver,'DrvCfg2.dat','default-policy.hex')
@@ -141,6 +151,7 @@ function Copy-Package([string]$From,[string]$To,$Manifest) {
 function Release-Files {foreach($file in $held){$file.Dispose()};$held.Clear()}
 function Snapshot([string]$InstalledHash,[string]$Expected='') {
     $args=@{ExpectedDeviceId=$ExpectedDeviceId;TransactionId=($TransactionId+$TransactionId);ManifestSha256=$InstalledHash}
+    if($candidateValidation){$args.CandidatePermitPath=$CandidatePermitPath;$args.CandidatePermitSha256=$CandidatePermitSha256;$args.SourceManifestSha256=$SourceManifestSha256}
     if($Expected){$args.ExpectedDigest=$Expected}
     $native=& (Join-Path $sourceRoot 'plugins/kpro-alerts/scripts/Invoke-PolicySnapshot.ps1') @args | ConvertFrom-Json
     if($native.schema -cne 'FalconProNativeSnapshot/v1' -or $native.exitCode -ne 0){throw 'Native policy snapshot unavailable.'}
@@ -224,7 +235,9 @@ try {
     $sourceManifest=Decode $sourceBytes
     $names=@('Install-FalconPro.ps1','Install-KProAlert.ps1','Invoke-FalconProLifecycle.ps1','Uninstall-KProAlert.ps1',
              'plugins/kpro-alerts/scripts/EndpointFacts.ps1','plugins/kpro-alerts/scripts/Invoke-PolicySnapshot.ps1','tools/KProReleaseTrust.psm1')
-    if($sourceManifest.schema -cne 'FalconProOnboardingSource/v2' -or @($sourceManifest.files).Count -ne $names.Count){throw 'Lifecycle source manifest required.'}
+    $sourceSchema='FalconProOnboardingSource/v2'
+    if($candidateValidation){$names+='Invoke-FalconProCandidateValidation.ps1';$sourceSchema='FalconProCandidateSource/v1'}
+    if($sourceManifest.schema -cne $sourceSchema -or @($sourceManifest.files).Count -ne $names.Count){throw 'Lifecycle source manifest required.'}
     $sources=@{}
     foreach($entry in $sourceManifest.files) {
         if($entry.name -cnotin $names -or $sources.ContainsKey($entry.name)){throw 'Source entry rejected.'}
@@ -232,29 +245,47 @@ try {
         if((Digest $data) -cne $entry.sha256){throw 'Source hash mismatch.'}
         $sources[$entry.name]=$data
     }
-    if((Digest $sources['tools/KProReleaseTrust.psm1']) -cne 'd558a5f3acd31ce847e119bf00a7193711045d9f30add5d72305bce0bd7d3870'){throw 'Native trust module mismatch.'}
+    if((Digest $sources['tools/KProReleaseTrust.psm1']) -cne '979c2d8cfd7e19317ae8e5752bad59f6431ac92d69777b5661b27ed7e1dd2639'){throw 'Native trust module mismatch.'}
     Import-Module (Join-Path $PSScriptRoot 'tools/KProReleaseTrust.psm1') -Force
     Assert-KProProgramFilesRoot $nativeProgramFiles
-    $descriptorBytes=Read-Captured (Join-Path (Split-Path $PSScriptRoot -Parent) 'FalconPro-release.ps1') 65536
-    $descriptor=Get-KProSignedReleaseDescriptor -Bytes $descriptorBytes
-    if($descriptor.sourceManifestSha256 -cne $SourceManifestSha256 -or $descriptor.packageManifestSha256 -cne $ManifestSha256 -or
-        $descriptor.platform -cne (Get-KProPackageLayout $ExpectedArchitecture).Platform){throw 'Native descriptor binding mismatch.'}
+    if($candidateValidation) {
+        $candidatePermit=Get-KProCandidatePermit $CandidatePermitPath $CandidatePermitSha256 $ExpectedDeviceId $TransactionId $ExpectedArchitecture $SourceManifestSha256 $Mode $PSScriptRoot $held
+        if($candidatePermit.packages[0].manifestSha256 -cne $ManifestSha256){throw 'Candidate target manifest mismatch.'}
+        $descriptorBytes=Read-Captured $CandidatePermitPath 65536
+    } else {
+        $descriptorBytes=Read-Captured (Join-Path (Split-Path $PSScriptRoot -Parent) 'FalconPro-release.ps1') 65536
+        $descriptor=Get-KProSignedReleaseDescriptor -Bytes $descriptorBytes
+        if($descriptor.sourceManifestSha256 -cne $SourceManifestSha256 -or $descriptor.packageManifestSha256 -cne $ManifestSha256 -or
+            $descriptor.platform -cne (Get-KProPackageLayout $ExpectedArchitecture).Platform){throw 'Native descriptor binding mismatch.'}
+    }
     $new=Read-Package $PackageRoot $ManifestSha256
+    if($candidateValidation -and $new.releaseStatus -cne 'candidate'){throw 'Validation target must remain candidate.'}
     $installed=Join-Path $nativeProgramFiles 'KProAlert'
     $parent=Join-Path $nativeProgramFiles 'FalconProTransactions'
     if(-not(Test-Path -LiteralPath $parent)){Protected-Directory $parent}
     Assert-Protected $parent
     $transactionLock=[IO.File]::Open((Join-Path $parent 'lifecycle.lock'),'OpenOrCreate','ReadWrite','None')
     $transactionRoot=Join-Path $parent $TransactionId
+    $candidateInstallArgs=@{}
+    if($candidateValidation) {
+        $CandidatePermitPath=Join-Path $transactionRoot 'candidate-permit.ps1'
+        $candidateInstallArgs=@{ValidateCandidate=$true;CandidatePermitPath=$CandidatePermitPath;CandidatePermitSha256=$CandidatePermitSha256;
+            ExpectedDeviceId=$ExpectedDeviceId;CandidateTransactionId=$TransactionId;CandidateOperation=$candidatePermit.operation;SourceManifestSha256=$SourceManifestSha256}
+    }
     if($Mode -in @('resume','rollback')) {
         Assert-Protected $transactionRoot
         $state=Decode (Read-Captured (Join-Path $transactionRoot 'result.json') 16384)
         Release-Files
-        if($state.schema -cne 'FalconProLifecycleResult/v1' -or $state.transactionId -cne $TransactionId -or
+        $resultSchema=if($candidateValidation){'FalconProCandidateLifecycleResult/v1'}else{'FalconProLifecycleResult/v1'}
+        if($state.schema -cne $resultSchema -or $state.transactionId -cne $TransactionId -or
            $state.deviceId -cne $ExpectedDeviceId -or $state.manifestSha256 -cne $ManifestSha256 -or
            $state.sourceManifestSha256 -cne $SourceManifestSha256 -or $state.deliveryUserSid -cne $DeliveryUserSid -or
            $state.architecture -cne $ExpectedArchitecture){throw 'Transaction mismatch.'}
+        if($candidateValidation -and ($state.validationOnly -ne $true -or $state.candidatePermitSha256 -cne $CandidatePermitSha256 -or
+            $state.operation -cne $candidatePermit.operation)){throw 'Candidate transaction mismatch.'}
+        if(-not $candidateValidation -and $state.PSObject.Properties['validationOnly'] -and $state.validationOnly){throw 'Candidate cannot resume as production.'}
         $sourceRoot=Join-Path $transactionRoot 'onboarding'
+        if($candidateValidation){$CandidatePermitPath=Join-Path $transactionRoot 'candidate-permit.ps1'}
         foreach($name in $names){Assert-Protected (Join-Path $sourceRoot $name)}
         if($Mode -eq 'resume' -and $state.phase -ceq 'cancelled_no_change') {
             Cancel-UnchangedUpgrade
@@ -291,7 +322,7 @@ try {
             # package, not the new release descriptor used for initial installation.
             $restored=& (Join-Path $sourceRoot 'Install-KProAlert.ps1') `
                 -PackageRoot $recovery -ManifestSha256 $state.oldManifestSha256 `
-                -DeliveryUserSid $DeliveryUserSid -Apply -Confirm:$false | ConvertFrom-Json
+                -DeliveryUserSid $DeliveryUserSid @candidateInstallArgs -Apply -Confirm:$false | ConvertFrom-Json
             if($restored.mode -cne 'service-running' -or $restored.collectorReady -ne $true){throw 'Recovery runtime failed.'}
             $null=Snapshot $state.oldManifestSha256 $state.policyDigest
             $state.installedVersion=$oldPackage.version
@@ -306,12 +337,12 @@ try {
         $hash=if($recovering){$state.oldManifestSha256}else{$ManifestSha256}
         $null=Snapshot $hash $state.policyDigest
         Assert-Collector
-        Write-State $(if($recovering){'rolled_back'}else{'complete'})
+        Write-State $(if($candidateValidation){if($recovering){'validation_rolled_back'}else{'validation_complete'}}elseif($recovering){'rolled_back'}else{'complete'})
         $state|ConvertTo-Json -Depth 8 -Compress
         return
     }
     if(Test-Path -LiteralPath $transactionRoot){throw 'Transaction already exists; use resume after inspecting its state.'}
-    if(-not $Apply){@{mode='verified-plan';operation=$Mode;version=$new.version;installsElamDriver=$false;requiresApproval=$true}|ConvertTo-Json;return}
+    if(-not $Apply){@{mode=$(if($candidateValidation){'candidate-validation-plan'}else{'verified-plan'});validationOnly=$candidateValidation;operation=$Mode;version=$new.version;installsElamDriver=$false;requiresApproval=$true}|ConvertTo-Json;return}
     if(-not $Approve){throw 'Explicit installation/upgrade approval required.'}
     if(-not $PSCmdlet.ShouldProcess($ExpectedDeviceId,$Mode+' FalconPro '+$new.version)){return}
     Protected-Directory $transactionRoot
@@ -324,11 +355,15 @@ try {
         if((Get-FileHash -LiteralPath $path).Hash -ine (Digest $sources[$name])){throw 'Staged source mismatch.'}
     }
     [IO.File]::WriteAllBytes((Join-Path $sourceRoot 'onboarding-source.json'),$sourceBytes)
-    [IO.File]::WriteAllBytes((Join-Path $transactionRoot 'FalconPro-release.ps1'),$descriptorBytes)
+    if($candidateValidation){
+        $CandidatePermitPath=Join-Path $transactionRoot 'candidate-permit.ps1'
+        [IO.File]::WriteAllBytes($CandidatePermitPath,$descriptorBytes)
+    }else{[IO.File]::WriteAllBytes((Join-Path $transactionRoot 'FalconPro-release.ps1'),$descriptorBytes)}
     $state=[ordered]@{schema='FalconProLifecycleResult/v1';transactionId=$TransactionId;deviceId=$ExpectedDeviceId;
         sourceManifestSha256=$SourceManifestSha256;manifestSha256=$ManifestSha256;deliveryUserSid=$DeliveryUserSid;
         operation=$Mode;version=$new.version;architecture=$ExpectedArchitecture;installedVersion=$new.version;phase='prepared';updatedUtc='';oldManifestSha256='';policyDigest='';
         bootIdentity=$os.LastBootUpTime.ToUniversalTime().ToString('o');evidenceDirectory='';recoveryEvidenceDirectory='';errorClass=''}
+    if($candidateValidation){$state.schema='FalconProCandidateLifecycleResult/v1';$state.validationOnly=$true;$state.productionEligible=$false;$state.candidatePermitSha256=$CandidatePermitSha256}
     Write-State 'prepared'
     Copy-Package $PackageRoot (Join-Path $transactionRoot 'package') $new
     if($Mode -eq 'upgrade') {
@@ -358,9 +393,15 @@ try {
     }
     Release-Files
     Write-State 'install_pending'
-    $installedResult=& (Join-Path $sourceRoot 'Install-FalconPro.ps1') -ExpectedDeviceId $ExpectedDeviceId `
+    if($candidateValidation) {
+        Assert-RecoveryTargetAbsent
+        $installedResult=& (Join-Path $sourceRoot 'Install-KProAlert.ps1') -PackageRoot (Join-Path $transactionRoot 'package') `
+            -ManifestSha256 $ManifestSha256 -DeliveryUserSid $DeliveryUserSid @candidateInstallArgs -Apply -Confirm:$false | ConvertFrom-Json
+    }else{
+        $installedResult=& (Join-Path $sourceRoot 'Install-FalconPro.ps1') -ExpectedDeviceId $ExpectedDeviceId `
         -SourceManifestSha256 $SourceManifestSha256 -PackageRoot (Join-Path $transactionRoot 'package') `
         -ManifestSha256 $ManifestSha256 -DeliveryUserSid $DeliveryUserSid -ApproveInstallation -Apply -Confirm:$false | ConvertFrom-Json
+    }
     if($installedResult.mode -cne 'service-running' -or $installedResult.driverRunning -ne $true -or
        $installedResult.collectorReady -ne $true){throw 'Installation runtime readback incomplete.'}
     $snapshot=Snapshot $ManifestSha256 $state.policyDigest
