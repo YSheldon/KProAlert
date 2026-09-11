@@ -73,6 +73,33 @@ function New-KProProtectionService([string]$ExecutablePath) {
     }
 }
 
+function Assert-KProInstallRootAcl([Security.AccessControl.DirectorySecurity]$Acl,[string]$UserSid) {
+    if (-not $Acl.AreAccessRulesProtected -or
+        $Acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne 'S-1-5-32-544') {
+        throw 'Install root owner/inheritance readback failed; no payload will be copied.'
+    }
+    $expected = @{
+        'S-1-5-18' = [Security.AccessControl.FileSystemRights]::FullControl
+        'S-1-5-32-544' = [Security.AccessControl.FileSystemRights]::FullControl
+    }
+    $expected[$UserSid] = [Security.AccessControl.FileSystemRights]::ReadAndExecute -bor
+        [Security.AccessControl.FileSystemRights]::Synchronize
+    $rules = $Acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])
+    if ($rules.Count -ne 3) { throw 'Install root ACL count readback failed.' }
+    $inherit = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor
+        [Security.AccessControl.InheritanceFlags]::ObjectInherit
+    foreach ($rule in $rules) {
+        $sid = $rule.IdentityReference.Value
+        if (-not $expected.ContainsKey($sid) -or $rule.IsInherited -or
+            $rule.AccessControlType -ne 'Allow' -or $rule.FileSystemRights -ne $expected[$sid] -or
+            $rule.InheritanceFlags -ne $inherit -or $rule.PropagationFlags -ne 'None') {
+            throw 'Install root ACL readback rejected unexpected permissions.'
+        }
+        $expected.Remove($sid)
+    }
+    if ($expected.Count -ne 0) { throw 'Install root ACL is missing a required principal.' }
+}
+
 try {
 $source = (Resolve-Path -LiteralPath $PackageRoot).ProviderPath
 Assert-PlainPath $source
@@ -190,6 +217,7 @@ if (-not $PSCmdlet.ShouldProcess($destination, 'Install signed FalconPro service
 New-Item -ItemType Directory -Path $destination | Out-Null
 $acl = New-Object Security.AccessControl.DirectorySecurity
 $acl.SetAccessRuleProtection($true,$false)
+$acl.SetOwner((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')))
 foreach ($sid in @('S-1-5-18','S-1-5-32-544')) {
     $rule = New-Object Security.AccessControl.FileSystemAccessRule(
         (New-Object Security.Principal.SecurityIdentifier($sid)), 'FullControl',
@@ -201,6 +229,7 @@ $deliveryAccount = $deliverySid.Translate([Security.Principal.NTAccount])
 $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
     $deliverySid, 'ReadAndExecute', 'ContainerInherit,ObjectInherit', 'None', 'Allow')))
 Set-Acl -LiteralPath $destination -AclObject $acl
+Assert-KProInstallRootAcl (Get-Acl -LiteralPath $destination) $DeliveryUserSid
 foreach ($entry in $manifest.files) {
     $target = Join-Path $destination $entry.name
     Copy-Item -LiteralPath (Join-Path $source $entry.name) -Destination $target
