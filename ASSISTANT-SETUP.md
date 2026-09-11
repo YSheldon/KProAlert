@@ -7,10 +7,23 @@ installation or endpoint protection.
 
 Give Codex, Grok Bot, WorkBuddy or Cursor `https://github.com/YSheldon/KProAlert` and ask it to install **FalconPro** following
 START-HERE.md. The assistant must distinguish installing this query connector from
-installing Windows endpoint protection. First protection preview scope is Windows
-11 x64; a Linux Grok Bot cannot install a Windows driver into its own container.
+installing Windows endpoint protection. Protection targets Windows 11 x64 and
+ARM64 workstations; a Linux Grok Bot cannot install a Windows driver into its own
+container. RemoteX is not an end-user dependency. Use the AI client's existing
+local Windows execution capability.
 
 ## Query connector setup
+
+On first use, `falconpro.py setup --client codex` (or `cursor`, `grok`,
+`workbuddy`) needs no database or Feishu credentials. It returns an explicitly
+onboarding-only plan: status tools work, unconfigured event queries return an
+error, and no database, service, driver or background task is created. After
+review, `--apply` registers through the supported client interface; Grok still
+uses its actual host registration tool. Existing conflicting configurations are
+preserved, never reset to empty by this initial setup mode.
+
+Configure a real local collector or an authorized Feishu source separately after
+installation. `onboardingOnly=true` is not protection or notification success.
 
 Prepare the documented isolated Python environment and install the pinned
 requirements. Run the helper with that interpreter. It discovers an existing
@@ -37,13 +50,12 @@ there is no invented Grok CLI. A generic client can use `--client generic`.
 
 ### Cursor
 
-Use `--client cursor` to plan and `--client cursor --apply` to emit the
-`mcpServers.kpro-alerts` configuration for Cursor's native MCP settings. This is
-a handoff, not an automatic settings write: `host_tool_required` means the
-installing assistant must merge only that named entry after checking existing
-configuration, not replace the entire file. Preserve an identical entry; stop and
-ask before changing a conflicting or disabled entry. Never enable auto-run or
-alter tool permissions as part of installation.
+Use `falconpro.py setup --client cursor` to plan and add `--apply` for the
+non-destructive Cursor configuration merge. It changes only the named
+`mcpServers.kpro-alerts` entry, preserves an identical entry, and stops before
+changing a conflicting or disabled entry. Never enable auto-run or alter tool
+permissions as part of installation. The lower-level `assistant_setup.py` keeps
+its `host_tool_required` handoff behavior; use the common entry for installation.
 
 The [official Cursor MCP configuration](https://cursor.com/docs/mcp) supports
 `~/.cursor/mcp.json` globally. Check the active project's `.cursor/mcp.json` too:

@@ -1,15 +1,15 @@
 {
   "name": "kpro-alerts",
-  "version": "0.2.1-preview",
-  "description": "Read-only FalconPro alert queries from a configured local event database.",
+  "version": "0.2.2-preview",
+  "description": "Guided local FalconPro setup and read-only security event analysis.",
   "author": {
     "name": "Local developer"
   },
   "skills": "./skills/",
   "interface": {
     "displayName": "FalconPro",
-    "shortDescription": "Use FalconPro alerts in Codex.",
-    "longDescription": "Query local FalconPro telemetry without installing drivers or changing security policy. Requires a separate collector.",
+    "shortDescription": "Set up FalconPro and analyze alerts.",
+    "longDescription": "Guide user-approved FalconPro Windows setup through signed release gates, then query and explain alerts. MCP tools stay read-only. The preview does not yet provide a verified one-click protection release.",
     "developerName": "Local developer",
     "category": "Productivity",
     "capabilities": [],

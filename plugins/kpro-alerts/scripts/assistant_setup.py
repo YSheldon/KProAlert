@@ -33,7 +33,9 @@ def make_plan(client, database=None, cli=None, base=None, table=None,
               client_command=None, workbuddy_config=None, collector_health=None, endpoint_device_id=None):
     if client not in ('codex', 'workbuddy', 'cursor', 'grok', 'generic'):
         raise ValueError('Unsupported assistant')
-    server = build_config(database, cli, base, table, collector_health, endpoint_device_id)['mcpServers']['kpro-alerts']
+    onboarding_only = not any((database, cli, base, table))
+    server = build_config(database, cli, base, table, collector_health, endpoint_device_id,
+                          onboarding_only=onboarding_only)['mcpServers']['kpro-alerts']
     command = []
     if client in ('codex', 'workbuddy'):
         command = client_command or discover_client(client)
@@ -42,6 +44,7 @@ def make_plan(client, database=None, cli=None, base=None, table=None,
         if not Path(command[0]).is_file():
             raise ValueError('Client executable does not exist')
     return dict(schema='KProAssistantSetup/v1', client=client, server=server,
+                onboardingOnly=onboarding_only, dataSourcesConfigured=not onboarding_only,
                 clientCommand=command, workbuddyConfig=str(Path(workbuddy_config or Path.home()/'.workbuddy').absolute()),
                 installsDriver=False, registersBackgroundTask=False,
                 requiresAdministrator=False, automaticRemediation=False)

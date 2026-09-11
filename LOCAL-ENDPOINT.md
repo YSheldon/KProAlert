@@ -36,7 +36,7 @@ cloud bots provide bootstrap instructions only.
 | local_channel_required | Connect an authorized local Windows channel. |
 | target_unbound / target_mismatch | Correct binding; no installation. |
 | unknown | Diagnose permission/CIM/probe failures; no reinstall. |
-| unsupported | Stop; public installer supports Windows 11 x64 workstations only. |
+| unsupported | Stop; the public installer targets Windows 11 x64/ARM64 workstations. |
 | conflicting_install / residual_install / partial_install | Preserve state; no overwrite or cleanup. |
 | installed_not_running | Diagnose service/driver failure; no automatic reinstall. |
 | running_policy_unverified | Separately verify policy and event flow. |
@@ -47,6 +47,22 @@ cloud bots provide bootstrap instructions only.
 filter instances or enforcement. Connected MCP/empty alerts prove no protection.
 
 ## Confirm Once, Then Install
+
+An ordinary user supplies the repository URL and confirms the intended local PC,
+not driver filenames, hashes, RemoteX profiles or SSH credentials. The assistant
+uses `falconpro.py status` to obtain the local identity, confirms it with the user,
+then uses `falconpro.py install --device-id <confirmed-device-id>`. The command
+discovers an admitted release, downloads its signed assets and prepares the exact
+plan. After consent, `--plan <plan-path> --apply --approve` performs installation
+with normal UAC. `upgrade` uses the same release trust and preserved-state checks.
+
+Do not automatically delete an existing stopped service whose image is missing.
+That is a partial installation, not clean absence. Inspect its provenance, offer
+a backed-up, specifically approved cleanup, then collect fresh endpoint facts.
+This is recovery of that PC's state, not a prerequisite for every user.
+
+The low-level example below is for reviewed integration/testing only. Do not ask
+ordinary users to assemble these parameters or use candidate validation permits.
 
 Download an immutable admitted public release through the normal download
 channel. Verify both package and onboarding-source manifest digests from a trusted

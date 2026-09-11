@@ -6,10 +6,14 @@ import re
 from pathlib import Path
 
 
-def build_config(database=None, cli=None, base=None, table=None, collector_health=None, endpoint_device_id=None):
+def build_config(database=None, cli=None, base=None, table=None, collector_health=None, endpoint_device_id=None, *, onboarding_only=False):
     if any((cli, base, table)) and not all((cli, base, table)):
         raise ValueError('Feishu requires CLI, base and table together')
-    if not database and not cli and not endpoint_device_id:
+    if type(onboarding_only) is not bool:
+        raise ValueError('Onboarding mode must be explicit')
+    if onboarding_only and any((database, cli, base, table)):
+        raise ValueError('Onboarding-only mode cannot replace configured data sources')
+    if not database and not cli and not endpoint_device_id and not onboarding_only:
         raise ValueError('configure a local database or Feishu source')
     env = {}
     if endpoint_device_id:
@@ -46,8 +50,10 @@ if __name__ == '__main__':
     parser.add_argument('--table')
     parser.add_argument('--collector-health')
     parser.add_argument('--endpoint-device-id')
+    parser.add_argument('--onboarding-only', action='store_true')
     parser.add_argument('--output', required=True)
     args = parser.parse_args()
-    config = build_config(args.database, args.cli, args.base, args.table, args.collector_health, args.endpoint_device_id)
+    config = build_config(args.database, args.cli, args.base, args.table, args.collector_health, args.endpoint_device_id,
+                          onboarding_only=args.onboarding_only)
     save_config(args.output, config)
     print('Configuration generated; no client settings or services changed.')
