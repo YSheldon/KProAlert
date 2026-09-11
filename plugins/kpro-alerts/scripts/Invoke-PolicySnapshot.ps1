@@ -4,7 +4,10 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{64}$')][string]$ExpectedDeviceId,
     [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{64}$')][string]$TransactionId,
     [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{64}$')][string]$ManifestSha256,
-    [ValidatePattern('^[a-f0-9]{64}$')][string]$ExpectedDigest
+    [ValidatePattern('^[a-f0-9]{64}$')][string]$ExpectedDigest,
+    [string]$CandidatePermitPath,
+    [ValidatePattern('^[a-f0-9]{64}$')][string]$CandidatePermitSha256,
+    [ValidatePattern('^[a-f0-9]{64}$')][string]$SourceManifestSha256
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
@@ -127,7 +130,7 @@ try {
     $module=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../tools/KProReleaseTrust.psm1'))
     $moduleBytes=Read-Locked $module 65536
     # Bound helper dependency; updating it requires a new reviewed/signed helper.
-    if((Get-Digest $moduleBytes) -cne 'd558a5f3acd31ce847e119bf00a7193711045d9f30add5d72305bce0bd7d3870') {
+    if((Get-Digest $moduleBytes) -cne '979c2d8cfd7e19317ae8e5752bad59f6431ac92d69777b5661b27ed7e1dd2639') {
         throw 'Native trust module mismatch.'
     }
     Import-Module $module -Force
@@ -138,12 +141,21 @@ try {
     $bindings=@([regex]::Matches($text,'(?m)^# KPRO-MANIFEST-SHA256: ([A-Fa-f0-9]{64})\r?$'))
     if($bindings.Count -ne 1 -or $bindings[0].Groups[1].Value -ne $ManifestSha256){throw 'Attestation binding mismatch.'}
     $manifest=[Text.Encoding]::UTF8.GetString($manifestBytes).TrimStart([char]0xfeff)|ConvertFrom-Json
-    if($manifest.schema -cne 'KProAlertRelease/v1' -or $manifest.releaseStatus -cne 'verified' -or
+    $candidateValidation=[bool]($CandidatePermitPath -or $CandidatePermitSha256)
+    if($candidateValidation) {
+        if(-not $CandidatePermitPath -or -not $CandidatePermitSha256 -or -not $SourceManifestSha256 -or
+           $TransactionId.Substring(0,32) -cne $TransactionId.Substring(32,32)){throw 'Candidate snapshot binding missing.'}
+        $sourceRoot=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../..'))
+        $permit=Get-KProCandidatePermit $CandidatePermitPath $CandidatePermitSha256 $ExpectedDeviceId $TransactionId.Substring(0,32) $architecture $SourceManifestSha256 'snapshot' $sourceRoot $held
+        Assert-KProCandidatePackage $permit $manifest $ManifestSha256 (Get-Digest $attestation)
+    }
+    if($manifest.schema -cne 'KProAlertRelease/v1' -or ($manifest.releaseStatus -cne 'verified' -and -not $candidateValidation) -or
         $manifest.platform -cne $layout.Platform -or $manifest.architecture -cne $architecture) {
         throw 'Installed package is not an admitted release.'
     }
     foreach($gate in @('serviceF1ArtifactProduct','driverMicrosoftProduct','dllProduct','policySignature',
                        'endToEnd','privateRawEventSpool')) {
+        if($candidateValidation -and $manifest.releaseStatus -ceq 'candidate' -and $gate -ceq 'endToEnd'){continue}
         if($manifest.gates.$gate -isnot [bool] -or $manifest.gates.$gate -ne $true){throw 'Installed release gate missing.'}
     }
     $names=@($layout.Service,$layout.Dll,$layout.Driver,'DrvCfg2.dat','default-policy.hex')

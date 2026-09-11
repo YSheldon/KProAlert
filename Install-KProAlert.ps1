@@ -5,6 +5,12 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ManifestSha256,
     [Parameter(Mandatory)][ValidatePattern('^S-1-5-21-[0-9-]+$')][string]$DeliveryUserSid,
     [switch]$ValidateCandidate,
+    [string]$CandidatePermitPath,
+    [ValidatePattern('^[a-f0-9]{64}$')][string]$CandidatePermitSha256,
+    [ValidatePattern('^[a-f0-9]{64}$')][string]$ExpectedDeviceId,
+    [ValidatePattern('^[a-f0-9]{32}$')][string]$CandidateTransactionId,
+    [ValidateSet('install','upgrade')][string]$CandidateOperation,
+    [ValidatePattern('^[a-f0-9]{64}$')][string]$SourceManifestSha256,
     [switch]$Apply
 )
 Set-StrictMode -Version Latest
@@ -36,6 +42,25 @@ function Invoke-ServiceCommand([string[]]$Arguments) {
     & (Join-Path $script:NativeSystemRoot 'System32\sc.exe') @Arguments | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Service operation failed ($LASTEXITCODE)." }
 }
+function Assert-CandidateIntentPath([string]$Path) {
+    $root=Get-KProNativeProgramFiles
+    Assert-KProProgramFilesRoot $root
+    $item=Get-Item -LiteralPath $Path -Force
+    $mask=[Security.AccessControl.FileSystemRights]::Write -bor [Security.AccessControl.FileSystemRights]::Delete -bor
+        [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+        [Security.AccessControl.FileSystemRights]::TakeOwnership
+    while($null -ne $item -and $item.FullName.TrimEnd('\') -ine $root.TrimEnd('\')) {
+        $acl=Get-Acl -LiteralPath $item.FullName
+        $raw=New-Object Security.AccessControl.RawSecurityDescriptor($acl.GetSecurityDescriptorBinaryForm(),0)
+        if($null -eq $raw.DiscretionaryAcl -or $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -notin @('S-1-5-18','S-1-5-32-544')){throw 'Candidate intent owner/DACL rejected.'}
+        foreach($rule in $acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier])) {
+            if($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $mask) -ne 0 -and
+               $rule.IdentityReference.Value -notin @('S-1-5-18','S-1-5-32-544')){throw 'Candidate intent is user writable.'}
+        }
+        if($item -is [IO.FileInfo]){$item=$item.Directory}else{$item=$item.Parent}
+    }
+    if($null -eq $item){throw 'Candidate intent escaped native root.'}
+}
 function New-KProProtectionService([string]$ExecutablePath) {
     $binaryPath = '"' + $ExecutablePath + '"'
     # Preserve literal quotes; a failed readback must not leave an auto-start item.
@@ -66,7 +91,7 @@ $attestationBytes = Read-LockedInput $attestationPath 65536
 $trustModule=Join-Path $PSScriptRoot 'tools/KProReleaseTrust.psm1'
 Assert-PlainPath $trustModule
 $null=Read-LockedInput $trustModule 1048576
-if ((Get-FileHash -LiteralPath $trustModule).Hash -ine 'd558a5f3acd31ce847e119bf00a7193711045d9f30add5d72305bce0bd7d3870') { throw 'Native trust module mismatch.' }
+if ((Get-FileHash -LiteralPath $trustModule).Hash -ine '979c2d8cfd7e19317ae8e5752bad59f6431ac92d69777b5661b27ed7e1dd2639') { throw 'Native trust module mismatch.' }
 Import-Module $trustModule -Force
 $attestationIdentity = Assert-KProReleaseAttestation -Bytes $attestationBytes
 $attestationText = ConvertFrom-KProAttestationText -Bytes $attestationBytes
@@ -92,6 +117,33 @@ $arch = if ($processorArchitectures[0] -eq 12) { 'arm64' } else { 'x64' }
 $layout = Get-KProPackageLayout -Architecture $arch
 if ($manifest.platform -cne $layout.Platform) { throw 'Release platform does not match the native OS.' }
 $candidate = $ValidateCandidate -and $manifest.releaseStatus -eq 'candidate'
+if($ValidateCandidate) {
+    if(-not $CandidatePermitPath -or -not $CandidatePermitSha256 -or -not $ExpectedDeviceId -or
+       -not $CandidateTransactionId -or -not $SourceManifestSha256 -or -not $CandidateOperation){throw 'Bound signed candidate authorization required.'}
+    $base=[Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine','Registry64')
+    try{$key=$base.OpenSubKey('SOFTWARE\Microsoft\Cryptography');try{$guid=[string]$key.GetValue('MachineGuid')}finally{$key.Dispose()}}finally{$base.Dispose()}
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try{$device=([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes('FalconPro-device-v1:'+$guid.ToLowerInvariant())))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+    if($device -cne $ExpectedDeviceId){throw 'Candidate device mismatch.'}
+    $permit=Get-KProCandidatePermit $CandidatePermitPath $CandidatePermitSha256 $device $CandidateTransactionId $arch $SourceManifestSha256 $CandidateOperation $PSScriptRoot $inputHandles
+    $transactionRoot=Join-Path (Join-Path (Get-KProNativeProgramFiles) 'FalconProTransactions') $CandidateTransactionId
+    $intentPath=Join-Path $transactionRoot 'result.json'
+    Assert-PlainPath $intentPath
+    Assert-CandidateIntentPath $intentPath
+    $intent=[Text.Encoding]::UTF8.GetString((Read-LockedInput $intentPath 16384)).TrimStart([char]0xfeff)|ConvertFrom-Json
+    if($intent.schema -cne 'FalconProCandidateLifecycleResult/v1' -or $intent.validationOnly -ne $true -or
+       $intent.transactionId -cne $CandidateTransactionId -or $intent.deviceId -cne $device -or
+       $intent.architecture -cne $arch -or $intent.operation -cne $CandidateOperation -or
+       $intent.candidatePermitSha256 -cne $CandidatePermitSha256 -or $intent.sourceManifestSha256 -cne $SourceManifestSha256 -or
+       $intent.deliveryUserSid -cne $DeliveryUserSid -or $intent.phase -cnotin @('install_pending','recovery_install_pending')) {
+        throw 'Candidate install requires the matching lifecycle intent.'
+    }
+    $intendedHash=if($intent.phase -ceq 'recovery_install_pending'){$intent.oldManifestSha256}else{$intent.manifestSha256}
+    if($intendedHash -ine $ManifestSha256){throw 'Candidate install intent targets a different package.'}
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try{$attestationHash=([BitConverter]::ToString($sha.ComputeHash($attestationBytes))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+    Assert-KProCandidatePackage $permit $manifest $ManifestSha256.ToLowerInvariant() $attestationHash
+}elseif($CandidatePermitPath -or $CandidatePermitSha256){throw 'Explicit candidate validation consent required.'}
 if ($manifest.schema -ne 'KProAlertRelease/v1' -or
     ($manifest.releaseStatus -ne 'verified' -and -not $candidate) -or $manifest.architecture -ne $arch) {
     throw 'Release schema/status/architecture gate failed.'
@@ -125,7 +177,7 @@ $nativeProgramFiles=Get-KProNativeProgramFiles
 Assert-KProProgramFilesRoot $nativeProgramFiles
 $destination = Join-Path $nativeProgramFiles 'KProAlert'
 if (Test-Path -LiteralPath $destination) { throw 'Destination exists; refusing to overwrite.' }
-$plan = [ordered]@{mode='verified-plan';attestationIdentity=$attestationIdentity;candidateValidation=[bool]$candidate;architecture=$arch;version=$manifest.version;destination=$destination;
+$plan = [ordered]@{mode='verified-plan';attestationIdentity=$attestationIdentity;candidateValidation=[bool]$ValidateCandidate;architecture=$arch;version=$manifest.version;destination=$destination;
     installsDriver=$true;installsElamDriver=$false;automaticAiRemediation=$false;requiresAdministrator=$true;
     deliveryUserSid=$DeliveryUserSid}
 if (-not $Apply) { $plan | ConvertTo-Json; return }
@@ -223,6 +275,7 @@ do {
 } while (-not $collectorReady -and [DateTime]::UtcNow -lt $deadline)
 if (-not $collectorReady) { throw 'Fresh successful collector receipt missing; installation is not complete.' }
 [ordered]@{mode='service-running';destination=$destination;driverRunning=$true;
+    validationOnly=[bool]$ValidateCandidate;productionEligible=(-not $ValidateCandidate);
     collectorReady=$collectorReady;eventEndToEndVerified=$false;aiConfigured=$false;rebootRecoveryVerified=$false} | ConvertTo-Json
 } finally {
     foreach($handle in $inputHandles){$handle.Dispose()}

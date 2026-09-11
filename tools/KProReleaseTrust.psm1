@@ -152,4 +152,112 @@ function Assert-KProProgramFilesRoot {
     }
 }
 
-Export-ModuleMember -Function Assert-KProReleaseAttestation,ConvertFrom-KProAttestationText,Get-KProPackageLayout,Assert-KProPeArchitecture,Get-KProSignedReleaseDescriptor,Get-KProNativeProgramFiles,Assert-KProProgramFilesRoot
+function Assert-KProCandidatePermitFacts {
+    param($Permit,[string]$Device,[string]$Transaction,[string]$Architecture,[string]$SourceHash,[string]$Mode)
+    $keys=@('schema','deviceId','transactionId','architecture','operation','sourceManifestSha256','issuedUtc','expiresUtc','packages')
+    if(@($Permit.PSObject.Properties).Count -ne $keys.Count -or
+       @($Permit.PSObject.Properties.Name | Where-Object {$_ -cnotin $keys}).Count -ne 0 -or
+       $Permit.schema -cne 'FalconProCandidatePermit/v1' -or
+       $Device -cnotmatch '^[a-f0-9]{64}$' -or $Transaction -cnotmatch '^[a-f0-9]{32}$' -or
+       $SourceHash -cnotmatch '^[a-f0-9]{64}$' -or $Architecture -cnotin @('x64','arm64') -or
+       $Permit.deviceId -cne $Device -or $Permit.transactionId -cne $Transaction -or
+       $Permit.architecture -cne $Architecture -or $Permit.sourceManifestSha256 -cne $SourceHash -or
+       $Permit.operation -cnotin @('install','upgrade') -or $Mode -cnotin @('install','upgrade','resume','rollback','snapshot') -or
+       ($Mode -cin @('install','upgrade') -and $Permit.operation -cne $Mode)) {throw 'Candidate permit binding rejected.'}
+    if($Permit.issuedUtc -cnotmatch 'Z$' -or $Permit.expiresUtc -cnotmatch 'Z$'){throw 'Candidate UTC validity required.'}
+    $issued=[DateTimeOffset]::Parse($Permit.issuedUtc,[Globalization.CultureInfo]::InvariantCulture)
+    $expires=[DateTimeOffset]::Parse($Permit.expiresUtc,[Globalization.CultureInfo]::InvariantCulture)
+    $now=[DateTimeOffset]::UtcNow
+    if($issued -gt $now -or $expires -le $now -or $expires -le $issued -or ($expires-$issued).TotalHours -gt 24) {throw 'Candidate permit expired or invalid.'}
+    $count=if($Permit.operation -ceq 'upgrade'){2}else{1}
+    if(@($Permit.packages).Count -ne $count){throw 'Candidate package bindings incomplete.'}
+    $seen=@{}
+    foreach($package in $Permit.packages) {
+        if($package.manifestSha256 -cnotmatch '^[a-f0-9]{64}$' -or $package.attestationSha256 -cnotmatch '^[a-f0-9]{64}$' -or
+           $seen.ContainsKey($package.manifestSha256)){throw 'Candidate package digest rejected.'}
+        $seen[$package.manifestSha256]=$true
+    }
+}
+
+function Assert-KProCandidatePackage {
+    param($Permit,$Manifest,[string]$ManifestHash,[string]$AttestationHash)
+    $bound=@($Permit.packages | Where-Object { $_.manifestSha256 -ceq $ManifestHash })
+    if($bound.Count -ne 1 -or $bound[0].attestationSha256 -cne $AttestationHash){throw 'Candidate package/attestation not authorized.'}
+    if($Manifest.releaseStatus -cnotin @('candidate','verified')){throw 'Candidate release status rejected.'}
+    if($ManifestHash -ceq $Permit.packages[0].manifestSha256 -and $Manifest.releaseStatus -cne 'candidate') {
+        throw 'Candidate target cannot be a verified release.'
+    }
+    foreach($gate in @('serviceF1ArtifactProduct','driverMicrosoftProduct','dllProduct','policySignature','endToEnd','privateRawEventSpool')) {
+        $expected= -not ($Manifest.releaseStatus -ceq 'candidate' -and $gate -ceq 'endToEnd')
+        if($Manifest.gates.$gate -isnot [bool] -or $Manifest.gates.$gate -ne $expected){throw 'Candidate signature or evidence gate rejected.'}
+    }
+    $layout=Get-KProPackageLayout $Permit.architecture
+    $names=@($layout.Service,$layout.Dll,$layout.Driver,'DrvCfg2.dat','default-policy.hex')
+    foreach($list in @(@{files=$bound[0].files},@{files=$Manifest.files})) {
+        if(@($list.files).Count -ne $names.Count){throw 'Candidate file count mismatch.'}
+        $seen=@{}
+        foreach($file in $list.files) {
+            if($file.name -cnotin $names -or $seen.ContainsKey($file.name) -or $file.sha256 -cnotmatch '^[a-f0-9]{64}$' -or
+               $file.size -is [string] -or $file.size -is [bool] -or $file.size -le 0 -or $file.size -gt 67108864){throw 'Candidate file entry rejected.'}
+            $seen[$file.name]=$true
+        }
+    }
+    foreach($file in $Manifest.files) {
+        $expected=@($bound[0].files | Where-Object {$_.name -ceq $file.name})[0]
+        if($expected.sha256 -cne $file.sha256 -or $expected.size -ne $file.size){throw 'Candidate file binding mismatch.'}
+    }
+}
+
+function Read-KProCandidateFile {
+    param([string]$Path,[int]$Maximum,$Handles)
+    $item=Get-Item -LiteralPath $Path -Force
+    if($item -isnot [IO.FileInfo]){throw 'Candidate file required.'}
+    $parent=$item
+    while($null -ne $parent) {
+        if($parent.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Candidate reparse path rejected.'}
+        if($parent -is [IO.FileInfo]){$parent=$parent.Directory}else{$parent=$parent.Parent}
+    }
+    $stream=[IO.File]::Open($item.FullName,'Open','Read','Read')
+    $Handles.Add($stream)
+    if($stream.Length -le 0 -or $stream.Length -gt $Maximum){throw 'Candidate file size rejected.'}
+    $bytes=New-Object byte[] ([int]$stream.Length)
+    $offset=0
+    while($offset -lt $bytes.Length){$count=$stream.Read($bytes,$offset,$bytes.Length-$offset);if($count -eq 0){throw 'Short candidate read.'};$offset+=$count}
+    return ,$bytes
+}
+function Get-KProCandidateDigest {
+    param([byte[]]$Bytes)
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try{return ([BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+}
+function Get-KProCandidatePermit {
+    param([string]$Path,[string]$Sha256,[string]$Device,[string]$Transaction,[string]$Architecture,[string]$SourceHash,[string]$Mode,[string]$SourceRoot,$Handles)
+    if($Sha256 -cnotmatch '^[a-f0-9]{64}$'){throw 'Explicit candidate permit digest required.'}
+    $bytes=Read-KProCandidateFile $Path 65536 $Handles
+    if((Get-KProCandidateDigest $bytes) -cne $Sha256){throw 'Candidate permit digest mismatch.'}
+    $null=Assert-KProReleaseAttestation -Bytes $bytes
+    $text=ConvertFrom-KProAttestationText -Bytes $bytes
+    $markers=@([regex]::Matches($text,'(?m)^# FALCONPRO-CANDIDATE-JSON: ([A-Za-z0-9+/=]+)\r?$'))
+    if($markers.Count -ne 1){throw 'One candidate permit payload required.'}
+    $utf8=New-Object Text.UTF8Encoding($false,$true)
+    $permit=$utf8.GetString([Convert]::FromBase64String($markers[0].Groups[1].Value))|ConvertFrom-Json
+    Assert-KProCandidatePermitFacts $permit $Device $Transaction $Architecture $SourceHash $Mode
+    $sourceBytes=Read-KProCandidateFile (Join-Path $SourceRoot 'onboarding-source.json') 16384 $Handles
+    if((Get-KProCandidateDigest $sourceBytes) -cne $SourceHash){throw 'Candidate source manifest mismatch.'}
+    $source=$utf8.GetString($sourceBytes).TrimStart([char]0xfeff)|ConvertFrom-Json
+    $names=@('Install-FalconPro.ps1','Install-KProAlert.ps1','Invoke-FalconProLifecycle.ps1','Uninstall-KProAlert.ps1',
+             'plugins/kpro-alerts/scripts/EndpointFacts.ps1','plugins/kpro-alerts/scripts/Invoke-PolicySnapshot.ps1',
+             'tools/KProReleaseTrust.psm1','Invoke-FalconProCandidateValidation.ps1')
+    if($source.schema -cne 'FalconProCandidateSource/v1' -or @($source.files).Count -ne $names.Count){throw 'Candidate sources incomplete.'}
+    $seen=@{}
+    foreach($entry in $source.files) {
+        if($entry.name -cnotin $names -or $seen.ContainsKey($entry.name)){throw 'Candidate source entry rejected.'}
+        $seen[$entry.name]=$true
+        $content=Read-KProCandidateFile (Join-Path $SourceRoot $entry.name) 1048576 $Handles
+        if((Get-KProCandidateDigest $content) -cne $entry.sha256){throw 'Candidate source drift.'}
+        if($entry.name.EndsWith('.ps1')){$null=Assert-KProReleaseAttestation -Bytes $content}
+    }
+    return $permit
+}
+
+Export-ModuleMember -Function Assert-KProReleaseAttestation,ConvertFrom-KProAttestationText,Get-KProPackageLayout,Assert-KProPeArchitecture,Get-KProSignedReleaseDescriptor,Get-KProNativeProgramFiles,Assert-KProProgramFilesRoot,Assert-KProCandidatePermitFacts,Assert-KProCandidatePackage,Get-KProCandidatePermit
