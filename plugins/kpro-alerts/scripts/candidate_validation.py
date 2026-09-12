@@ -48,8 +48,11 @@ def validate_result(reply, options):
     else:
         if (reply['schema'] != 'FalconProCandidateLifecycleResult/v1' or 'mode' in reply or
                 reply.get('productionEligible') is not False or reply.get('phase') not in (
-                    'awaiting_reboot','recovery_awaiting_reboot','validation_complete','validation_rolled_back','cancelled_no_change')):
+                    'awaiting_reboot','recovery_awaiting_reboot','validation_complete','validation_rolled_back','validation_aborted','cancelled_no_change')):
             raise ValueError('Invalid candidate lifecycle result')
+        if reply['phase']=='validation_aborted' and (reply.get('operation')!='install' or
+                reply.get('installedVersion')!='' or options['Mode']!='rollback'):
+            raise ValueError('Invalid candidate aborted-install outcome')
         for field, option in (('deviceId','ExpectedDeviceId'),('transactionId','TransactionId'),
                               ('architecture','ExpectedArchitecture'),('sourceManifestSha256','SourceManifestSha256'),
                               ('manifestSha256','ManifestSha256'),('candidatePermitSha256','CandidatePermitSha256')):

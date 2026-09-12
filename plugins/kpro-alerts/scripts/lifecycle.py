@@ -17,6 +17,7 @@ from release_manifest import validate
 from spool import checked
 from windows_tools import native_tool
 from release_platforms import layout
+from elevation import run_elevated
 
 
 SOURCES = ('Install-FalconPro.ps1', 'Install-KProAlert.ps1',
@@ -168,30 +169,35 @@ def native_execute(value, mode):
           '-SourceManifestSha256',value['sourceManifestSha256'],'-ManifestSha256',value['manifestSha256'],
           '-PackageRoot',str(root/'package'),'-DeliveryUserSid',value['deliveryUserSid'],'-Approve','-Apply']
     args+=['-ExpectedArchitecture',value['architecture']]
-    code=("$ErrorActionPreference='Stop'; $child=Start-Process -FilePath "+ps_quote(executable)+
-          " -Verb RunAs -WindowStyle Hidden -PassThru -Wait -ArgumentList "+
-          ps_quote(subprocess.list2cmdline(args))+"; exit $child.ExitCode")
     with lock_entry(entry):
         verify_entry(entry)
-        result=subprocess.run([executable,'-NoProfile','-NonInteractive','-Command',code],
-                              capture_output=True,timeout=600)
+        result=run_elevated(executable,args)
+    if result['cancelled']:
+        return dict(state='elevation_cancelled',nativeExitCode=1223,
+                    transactionId=value['transactionId'],operationStarted=False,
+                    installPerformed=False,outcomeUncertain=False,automaticRetry=False)
+    if result['exitCode'] != 0:
+        return dict(state='attention_required',nativeExitCode=result['exitCode'],
+                    transactionId=value['transactionId'],automaticRetry=False,
+                    operationStarted=result['started'],outcomeUncertain=True)
     # The source/receipt roots are fixed by the native OS, never a remote payload.
     import winreg
     with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,r'SOFTWARE\Microsoft\Windows\CurrentVersion',
                        0,winreg.KEY_READ|winreg.KEY_WOW64_64KEY) as key:
         program_files=Path(winreg.QueryValueEx(key,'ProgramFilesDir')[0])
     path=program_files/'FalconProTransactions'/value['transactionId']/'result.json'
-    if result.returncode!=0:
-        return dict(state='attention_required',nativeExitCode=result.returncode,
-                    transactionId=value['transactionId'],automaticRetry=False,
-                    installPerformed=False,outcomeUncertain=True)
     reply=read_json(path,16384)
-    for name in ('deviceId','transactionId','manifestSha256','sourceManifestSha256','deliveryUserSid','version','architecture'):
+    for name in ('deviceId','transactionId','manifestSha256','sourceManifestSha256','deliveryUserSid','version','architecture','operation'):
         if reply.get(name)!=value[name]:
             raise ValueError('Native lifecycle result binding failed')
     if reply.get('schema')!='FalconProLifecycleResult/v1' or reply.get('phase') not in (
-            'awaiting_reboot','complete','recovery_awaiting_reboot','rolled_back','cancelled_no_change'):
+            'awaiting_reboot','complete','recovery_awaiting_reboot','rolled_back','cancelled_no_change','installation_aborted'):
         raise ValueError('Native lifecycle outcome is incomplete')
+    if reply['phase']=='installation_aborted':
+        if value['operation']!='install' or mode!='rollback' or reply.get('installedVersion')!='':
+            raise ValueError('Invalid aborted-install outcome')
+        return dict(state='installation_aborted',transactionId=value['transactionId'],
+                    installPerformed=False,rebootRequired=False,userDataPreserved=True,automaticRetry=False)
     return dict(state=reply['phase'],transactionId=value['transactionId'],
                 version=reply.get('installedVersion',reply['version']),
                 installPerformed=reply['phase']!='cancelled_no_change',
@@ -211,7 +217,8 @@ def apply(value, *, approval=False, mode=None, platform=None, verifier=verify_de
         raise ValueError('Operation changed after planning')
     state=endpoint_probe(value['deviceId'])
     allowed={'install':{'not_installed'},'upgrade':{'running_policy_unverified'},
-             'resume':{'running_policy_unverified'},'rollback':{'running_policy_unverified','not_installed'}}
+             'resume':{'running_policy_unverified'},
+             'rollback':{'running_policy_unverified','not_installed','residual_install','partial_install','installed_not_running'}}
     if state.get('state') not in allowed[selected]:
         raise ValueError('Endpoint changed; do not reinstall or replay a partial operation')
     if state.get('architecture')!=value['architecture']:

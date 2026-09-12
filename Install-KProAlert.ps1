@@ -10,6 +10,7 @@ param(
     [ValidatePattern('^[a-f0-9]{64}$')][string]$ExpectedDeviceId,
     [ValidatePattern('^[a-f0-9]{32}$')][string]$CandidateTransactionId,
     [ValidateSet('install','upgrade')][string]$CandidateOperation,
+    [ValidatePattern('^[a-f0-9]{32}$')][string]$LifecycleTransactionId,
     [ValidatePattern('^[a-f0-9]{64}$')][string]$SourceManifestSha256,
     [switch]$Apply
 )
@@ -98,6 +99,43 @@ function Assert-KProInstallRootAcl([Security.AccessControl.DirectorySecurity]$Ac
         $expected.Remove($sid)
     }
     if ($expected.Count -ne 0) { throw 'Install root ACL is missing a required principal.' }
+}
+
+function Read-KProInstallIntent {
+    if(-not $LifecycleTransactionId){return $null}
+    if($ExpectedDeviceId -cnotmatch '^[a-f0-9]{64}$' -or $SourceManifestSha256 -cnotmatch '^[a-f0-9]{64}$'){
+        throw 'Lifecycle marker requires bound device and source hashes.'
+    }
+    if($ValidateCandidate -and $LifecycleTransactionId -cne $CandidateTransactionId){throw 'Candidate transaction mismatch.'}
+    $path=Join-Path (Join-Path (Join-Path (Get-KProNativeProgramFiles) 'FalconProTransactions') $LifecycleTransactionId) 'result.json'
+    Assert-PlainPath $path
+    Assert-CandidateIntentPath $path
+    $intent=[Text.Encoding]::UTF8.GetString((Read-LockedInput $path 16384)).TrimStart([char]0xfeff)|ConvertFrom-Json
+    $schema=if($ValidateCandidate){'FalconProCandidateLifecycleResult/v1'}else{'FalconProLifecycleResult/v1'}
+    if($intent.schema -cne $schema -or $intent.transactionId -cne $LifecycleTransactionId -or
+       $intent.deviceId -cne $ExpectedDeviceId -or $intent.sourceManifestSha256 -cne $SourceManifestSha256 -or
+       $intent.deliveryUserSid -cne $DeliveryUserSid -or $intent.architecture -cne $arch -or
+       $intent.phase -cnotin @('install_pending','recovery_install_pending')){throw 'Lifecycle intent does not authorize this root.'}
+    $expected=if($intent.phase -ceq 'recovery_install_pending'){$intent.oldManifestSha256}else{$intent.manifestSha256}
+    if($expected -ine $ManifestSha256){throw 'Lifecycle root targets the wrong package.'}
+    return $intent
+}
+
+function Write-KProInstallRootMarker([string]$Directory) {
+    if($null -eq $installationIntent){return}
+    $marker=[ordered]@{schema='FalconProInstallRoot/v1';transactionId=$LifecycleTransactionId;
+        deviceId=$ExpectedDeviceId;manifestSha256=$ManifestSha256.ToLowerInvariant();sourceManifestSha256=$SourceManifestSha256}
+    $bytes=[Text.Encoding]::UTF8.GetBytes(($marker|ConvertTo-Json -Compress))
+    $path=Join-Path $Directory '.falconpro-install.json'
+    $file=[IO.File]::Open($path,'CreateNew','Write','None')
+    try{$file.Write($bytes,0,$bytes.Length);$file.Flush($true)}finally{$file.Dispose()}
+    $markerAcl=Get-Acl -LiteralPath $path
+    $markerAcl.SetOwner((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')))
+    Set-Acl -LiteralPath $path -AclObject $markerAcl
+    Assert-CandidateIntentPath $path
+    if([Convert]::ToBase64String([IO.File]::ReadAllBytes($path)) -cne [Convert]::ToBase64String($bytes)){
+        throw 'Install root marker readback failed.'
+    }
 }
 
 try {
@@ -204,6 +242,7 @@ $nativeProgramFiles=Get-KProNativeProgramFiles
 Assert-KProProgramFilesRoot $nativeProgramFiles
 $destination = Join-Path $nativeProgramFiles 'KProAlert'
 if (Test-Path -LiteralPath $destination) { throw 'Destination exists; refusing to overwrite.' }
+$installationIntent=Read-KProInstallIntent
 $plan = [ordered]@{mode='verified-plan';attestationIdentity=$attestationIdentity;candidateValidation=[bool]$ValidateCandidate;architecture=$arch;version=$manifest.version;destination=$destination;
     installsDriver=$true;installsElamDriver=$false;automaticAiRemediation=$false;requiresAdministrator=$true;
     deliveryUserSid=$DeliveryUserSid}
@@ -230,6 +269,7 @@ $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule(
     $deliverySid, 'ReadAndExecute', 'ContainerInherit,ObjectInherit', 'None', 'Allow')))
 Set-Acl -LiteralPath $destination -AclObject $acl
 Assert-KProInstallRootAcl (Get-Acl -LiteralPath $destination) $DeliveryUserSid
+Write-KProInstallRootMarker $destination
 foreach ($entry in $manifest.files) {
     $target = Join-Path $destination $entry.name
     Copy-Item -LiteralPath (Join-Path $source $entry.name) -Destination $target
