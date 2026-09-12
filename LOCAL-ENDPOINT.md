@@ -8,14 +8,17 @@ A Windows cloud host is not automatically the PC either: the user must confirm
 the intended device fingerprint independently. Never auto-bind a cloud result.
 The fingerprint is an identity check, not a credential or hardware attestation.
 
-Run in the intended PC's dedicated Python environment:
+Run the signed endpoint entry on the intended PC; Python is not required for
+this probe or installation. Obtain it from the verified Release onboarding
+archive, not an unsigned source checkout:
 
 ```powershell
-.\.venv\Scripts\python.exe plugins/kpro-alerts/scripts/endpoint.py
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\falconpro.ps1 -Mode status
 ```
 
-This read-only probe returns `target_unbound` plus a hashed device identity,
-not raw MachineGuid, hostname or personal paths. After confirming the PC:
+This read-only probe returns endpoint facts and a hashed device identity,
+not raw MachineGuid, hostname or personal paths. Separately, on the AI connector
+host with its documented Python environment, bind the confirmed PC:
 
 ```powershell
 .\.venv\Scripts\python.exe plugins/kpro-alerts/scripts/setup_config.py --endpoint-device-id <confirmed-device-id> --output falconpro-mcp.local.json
@@ -36,7 +39,7 @@ cloud bots provide bootstrap instructions only.
 | local_channel_required | Connect an authorized local Windows channel. |
 | target_unbound / target_mismatch | Correct binding; no installation. |
 | unknown | Diagnose permission/CIM/probe failures; no reinstall. |
-| unsupported | Stop; the public installer targets Windows 11 x64/ARM64 workstations. |
+| unsupported | Stop; consult WINDOWS-COMPATIBILITY.md and the admitted package matrix. |
 | conflicting_install / residual_install / partial_install | Preserve state; no overwrite or cleanup. |
 | installed_not_running | Diagnose service/driver failure; no automatic reinstall. |
 | running_policy_unverified | Separately verify policy and event flow. |
@@ -50,11 +53,13 @@ filter instances or enforcement. Connected MCP/empty alerts prove no protection.
 
 An ordinary user supplies the repository URL and confirms the intended local PC,
 not driver filenames, hashes, RemoteX profiles or SSH credentials. The assistant
-uses `falconpro.py status` to obtain the local identity, confirms it with the user,
-then uses `falconpro.py install --device-id <confirmed-device-id>`. The command
+uses the signed `falconpro.ps1 -Mode status` to obtain the local identity,
+confirms it with the user, then runs the same entry with `-Mode install
+-ExpectedDeviceId <confirmed-device-id>`. The command
 discovers an admitted release, downloads its signed assets and prepares the exact
-plan. After consent, `--plan <plan-path> --apply --approve` performs installation
-with normal UAC. `upgrade` uses the same release trust and preserved-state checks.
+plan. After consent, adding `-PlanPath <plan-path> -Apply -Approve` performs
+installation with normal UAC. `-Mode upgrade` uses the same release trust and
+preserved-state checks. WINDOWS-COMPATIBILITY.md gives the complete invocation.
 
 Do not automatically delete an existing stopped service whose image is missing.
 That is a partial installation, not clean absence. Inspect its provenance, offer
@@ -70,7 +75,8 @@ release source, never an alert URL. Independently verify Install-FalconPro.ps1
 against the trusted source manifest BEFORE executing it; self-checks cannot
 authenticate a substituted entry script. Stage sources and package in an
 administrator-controlled directory for elevated execution, not a writable shared
-folder. The wrapper verifies all four source files before invoking helpers.
+folder. The wrapper verifies the source set bound by that source-manifest version
+before invoking helpers.
 
 ```powershell
 .\Install-FalconPro.ps1 -ExpectedDeviceId <confirmed-device-id> -SourceManifestSha256 <trusted-source-manifest-sha256> -PackageRoot <verified-package> -ManifestSha256 <trusted-package-manifest-sha256> -DeliveryUserSid <local-user-sid>

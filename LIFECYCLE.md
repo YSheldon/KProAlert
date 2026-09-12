@@ -3,36 +3,38 @@
 Give Codex, Grok Bot, WorkBuddy or Cursor this address:
 https://github.com/YSheldon/KProAlert
 
-The common entry is `falconpro.py`, run with this repository's documented Python
-venv. Run `python falconpro.py --help` for commands. The published default branch
-and reviewed revision, not an unrelated KPro source-directory prototype, are the
-source of the integration. Client runtime registration and Windows installation
-are verified independently.
+The Windows endpoint entry is the signed `falconpro.ps1` from the verified
+Release onboarding archive. It does not require Python on the protected PC.
+The optional `falconpro.py` entry and AI connectors retain their own Python/MCP
+requirements. The published default branch and reviewed revision, not an
+unrelated source-directory prototype, define the integration. Client runtime
+registration and Windows installation are verified independently.
 
-The Windows installation lane supports Windows 11 x64 and ARM64 workstations.
+See WINDOWS-COMPATIBILITY.md for the Windows 7 SP1, 8.1, 10 and 11 package matrix
+and PowerShell/.NET prerequisites. Implemented OS selection is not per-platform
+runtime acceptance or a released package.
 The endpoint probe, signed release descriptor, manifest and PE Machine must all
 agree; unknown or changed architecture is rejected before installation. ARM64
 uses `KProSvcArm.exe`, `KProProtectArm.dll` and `KProFilterArm.sys`. It never
-selects x64 components just because the AI tool runs under emulation. Win7/x86
-driver support elsewhere in the product is not a public-installer support claim.
+selects x64 components just because the AI tool runs under emulation.
 
 ## Installation
 
-1. `python falconpro.py status` identifies the execution host. Confirm the actual
-   Windows PC before binding its returned device ID. A cloud bot returns
-   `local_channel_required`; it can configure its own Feishu reader and hand the
-   Windows steps to an authorized endpoint channel.
-2. `python falconpro.py install --device-id <confirmed-device-id>` downloads and
+1. `powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\falconpro.ps1 -Mode status`
+   identifies the execution host. Confirm the actual Windows PC before binding
+   its returned device ID. A cloud bot must use an authorized local endpoint
+   channel; it must not bind its own cloud computer as the protected PC.
+2. `powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\falconpro.ps1 -Mode install -ExpectedDeviceId <confirmed-device-id>` downloads and
    checks the stable signed release and outputs a persistent plan path. It needs
    no user-supplied package path, checksum, SID or policy key.
-3. After approval, run `python falconpro.py install --plan <plan-path> --apply --approve`.
+3. After approval, run the same PowerShell command with `-PlanPath <plan-path> -Apply -Approve`.
    The entry revalidates downloaded sources, the signed descriptor and all file
    hashes, verifies the native entry signature, then requests Windows elevation.
   The native executor stages files under administrator-controlled Program Files
   and invokes the existing DLL-backed product installer.
 4. `awaiting_reboot` means service, driver, collector and current effective-policy
    checks passed. Schedule a normal reboot at the user's chosen time. Run the same
-   command with `--resume` after reboot. `complete` requires a new boot identity,
+   command with `-Mode resume` after reboot. `complete` requires a new boot identity,
    the same effective policy digest and fresh collector status.
 
 If there is no verified stable release descriptor, the operation stops before
@@ -40,8 +42,10 @@ elevation or installation. The existing controlled-validation prerelease remains
 ineligible. The new native entry must be signed and packaged before this command
 can execute it. This source implementation does not declare a public release ready.
 
-New plans use `FalconProLifecyclePlan/v2` and bind the native architecture.
-Existing v1 plans are x64-only; revalidation is still required. Native PowerShell
+New plans use `FalconProLifecyclePlan/v3` and bind native architecture and OS
+platform. The PowerShell entry requires onboarding v3 and plan v3. The Python
+entry still reads older plans under their original Windows 11 scope; existing
+v1 plans are x64-only, and revalidation is required. Native PowerShell
 helpers use process-local `RemoteSigned`, in addition to explicit signature and
 publisher verification. They do not change the machine execution policy or
 suppress UAC. Program Files is resolved from the native registry, not caller
@@ -75,8 +79,9 @@ does not automatically opt in to messages, metrics or destructive remediation.
 
 ## Upgrade And Recovery
 
-Use `python falconpro.py upgrade --device-id <confirmed-device-id>` and then
-`python falconpro.py upgrade --plan <plan-path> --apply --approve`.
+Use the same signed PowerShell entry with `-Mode upgrade -ExpectedDeviceId
+<confirmed-device-id>` to prepare a plan, then add `-PlanPath <plan-path>
+-Apply -Approve` to execute the confirmed upgrade.
 
 The old service must support the effective-policy snapshot interface. The updater
 accepts a strictly higher four-component release version and unchanged signed
@@ -85,13 +90,13 @@ requests product-authorized uninstall, preserves the old evidence archive, insta
 the new release, and verifies the same effective-policy digest. The user database,
 notification cursor and metrics ID are outside the replacement payload.
 
-After reboot use `--resume`. A pending interrupted step is not replayed. Inspect
+After reboot use `-Mode resume`. A pending interrupted step is not replayed. Inspect
 the protected `Program Files/FalconProTransactions/<transactionId>/result.json`.
-For an admitted recoverable upgrade, `--rollback --apply --approve` restores only
+For an admitted recoverable upgrade, `-Mode rollback -Apply -Approve` restores only
 the transaction's exact prior signed package through the same product installer;
 it does not sign policy, force-unload drivers, delete broken partial installations
 or permit an arbitrary downgrade. `recovery_awaiting_reboot` requires another
-normal reboot and `--resume` before `rolled_back` can be returned.
+normal reboot and `-Mode resume` before `rolled_back` can be returned.
 
 New lifecycle-owned installs write an administrator-protected
 `.falconpro-install.json` before copying payloads. It binds the device,
