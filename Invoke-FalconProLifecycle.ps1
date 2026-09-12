@@ -149,6 +149,186 @@ function Copy-Package([string]$From,[string]$To,$Manifest) {
     }
 }
 function Release-Files {foreach($file in $held){$file.Dispose()};$held.Clear()}
+
+function Assert-PartialFilePrefix([string]$Path,[string]$Candidate) {
+    $actual=$null;$expected=$null;$sha=$null
+    try{
+        $actual=[IO.File]::Open($Path,'Open','Read','Read')
+        $expected=[IO.File]::Open($Candidate,'Open','Read','Read')
+        if($expected.Length -gt 64MB -or $actual.Length -gt $expected.Length){throw 'Partial file size rejected.'}
+        $sha=[Security.Cryptography.SHA256]::Create()
+        $a=New-Object byte[] 65536;$b=New-Object byte[] 65536
+        $remaining=$actual.Length
+        while($remaining -gt 0){
+            $need=[int][Math]::Min($remaining,$a.Length)
+            foreach($pair in @(@($actual,$a),@($expected,$b))){
+                $offset=0
+                while($offset -lt $need){
+                    $count=$pair[0].Read($pair[1],$offset,$need-$offset)
+                    if($count -eq 0){throw 'Short partial-file read.'}
+                    $offset+=$count
+                }
+            }
+            if([BitConverter]::ToString($sha.ComputeHash($a,0,$need)) -cne [BitConverter]::ToString($sha.ComputeHash($b,0,$need))){
+                throw 'Partial file is not a prefix of the signed candidate.'
+            }
+            $remaining-=$need
+        }
+    }finally{if($sha){$sha.Dispose()};if($actual){$actual.Dispose()};if($expected){$expected.Dispose()}}
+}
+
+function Assert-DefaultDataStream([string]$Path) {
+    if(-not ('FalconPro.PartialStreamsV1' -as [type])){
+        Add-Type -TypeDefinition @'
+using System;
+using System.ComponentModel;
+using System.Runtime.InteropServices;
+namespace FalconPro {
+    public static class PartialStreamsV1 {
+        [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+        private struct StreamData {
+            public long Size;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst=296)] public string Name;
+        }
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        private static extern IntPtr FindFirstStreamW(string path, int level, out StreamData data, uint flags);
+        [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool FindNextStreamW(IntPtr handle, out StreamData data);
+        [DllImport("kernel32.dll", SetLastError=true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool FindClose(IntPtr handle);
+        public static void Check(string path) {
+            StreamData data;
+            IntPtr handle=FindFirstStreamW(path,0,out data,0);
+            if(handle==new IntPtr(-1)) {
+                int error=Marshal.GetLastWin32Error();
+                if(error==38) return;
+                throw new Win32Exception(error);
+            }
+            try {
+                if(data.Name!="::$DATA") throw new InvalidOperationException("Unexpected alternate data stream.");
+                if(FindNextStreamW(handle,out data)) throw new InvalidOperationException("Unexpected additional stream.");
+                int error=Marshal.GetLastWin32Error();
+                if(error!=38) throw new Win32Exception(error);
+            } finally { FindClose(handle); }
+        }
+    }
+}
+'@
+    }
+    [FalconPro.PartialStreamsV1]::Check($Path)
+}
+
+function Assert-InstallRootMarker([string]$Path,[string]$ExpectedPackageHash) {
+    Assert-Protected $Path
+    if((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Reparse partial root rejected.'}
+    Assert-DefaultDataStream $Path
+    $markerPath=Join-Path $Path '.falconpro-install.json'
+    Assert-Protected $markerPath
+    $markerItem=Get-Item -LiteralPath $markerPath -Force
+    if($markerItem.Length -gt 4096 -or $markerItem.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Invalid partial marker.'}
+    $utf8=New-Object Text.UTF8Encoding($false,$true)
+    Assert-DefaultDataStream $markerPath
+    $marker=$utf8.GetString((Read-Captured $markerPath 4096)).TrimStart([char]0xfeff)|ConvertFrom-Json
+    $fields=@('schema','transactionId','deviceId','manifestSha256','sourceManifestSha256')
+    if(@($marker.PSObject.Properties).Count -ne $fields.Count){throw 'Invalid partial marker fields.'}
+    foreach($name in $fields){if($marker.$name -isnot [string]){throw 'Invalid partial marker type.'}}
+    if($marker.schema -cne 'FalconProInstallRoot/v1' -or $marker.transactionId -cne $TransactionId -or
+       $marker.deviceId -cne $ExpectedDeviceId -or $marker.manifestSha256 -cne $ExpectedPackageHash -or
+       $marker.sourceManifestSha256 -cne $SourceManifestSha256){throw 'Partial installation belongs to another transaction.'}
+}
+
+function Assert-PartialInstallation([string]$Path,$Package,[string]$ExpectedPackageHash=$ManifestSha256,[string]$CandidateRoot=$PackageRoot) {
+    Assert-InstallRootMarker $Path $ExpectedPackageHash
+    $allowed=@{}
+    foreach($name in @($Package.files.name)+@('release-manifest.json','release-attestation.ps1')){$allowed[$name]=Join-Path $CandidateRoot $name}
+    $directories=@('logs','private-event-spool','alert-spool','alert-spool\archive')
+    $queue=New-Object 'System.Collections.Generic.Queue[string]'
+    $queue.Enqueue($Path)
+    $total=0
+    while($queue.Count -gt 0){
+        $directory=$queue.Dequeue()
+        $items=@(Get-ChildItem -LiteralPath $directory -Force|Select-Object -First 33)
+        $total+=$items.Count
+        if($total -gt 32){throw 'Unexpected partial installation size.'}
+        foreach($item in $items){
+            if($item.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Reparse partial entry rejected.'}
+            Assert-Protected $item.FullName
+            Assert-DefaultDataStream $item.FullName
+            $relative=$item.FullName.Substring($Path.TrimEnd('\').Length+1)
+            if($item.PSIsContainer){
+                if($relative -notin $directories){throw 'Unknown partial directory.'}
+                $queue.Enqueue($item.FullName)
+            }elseif($relative -cne '.falconpro-install.json'){
+                if(-not $allowed.ContainsKey($relative)){throw 'Unknown partial file; preserve for review.'}
+                Assert-PartialFilePrefix $item.FullName $allowed[$relative]
+            }
+        }
+    }
+}
+
+function Assert-PartialRuntimeAbsent {
+    $services=@(Get-CimInstance Win32_Service -Filter "Name='KProSvc'" -ErrorAction Stop)
+    $processes=@(Get-CimInstance Win32_Process -Filter "Name='KProSvc.exe' OR Name='KProSvc32.exe' OR Name='KProSvcArm.exe' OR Name='KProSvcLegacy.exe' OR Name='KProSvcLegacy32.exe'" -ErrorAction Stop)
+    if($services.Count -ne 0 -or $processes.Count -ne 0){throw 'Product runtime still exists; no partial archive allowed.'}
+    $windows=[string](Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).WindowsDirectory
+    $lines=@(& (Join-Path $windows 'System32\fltmc.exe') filters 2>&1)
+    if($LASTEXITCODE -ne 0 -or $lines.Count -lt 2){throw 'Cannot prove filter absence.'}
+    if(($lines -join "`n") -match '(?im)^\s*KProFilter\s'){throw 'Filter is still loaded; no partial archive allowed.'}
+}
+
+function Archive-PartialInstallation($Package,[switch]$Recovery,[string]$ExpectedPackageHash=$ManifestSha256,[string]$CandidateRoot=$PackageRoot) {
+    Assert-PartialRuntimeAbsent
+    $fresh=if($Recovery){'recovery_install_pending'}else{'install_pending'}
+    $pending=if($Recovery){'recovery_partial_archive_pending'}else{'partial_archive_pending'}
+    $done=if($Recovery){'recovery_partial_archived'}else{'partial_archived'}
+    $property=if($Recovery){'partialRecoveryEvidenceDirectory'}else{'partialEvidenceDirectory'}
+    $prefix=if($Recovery){'KProAlert.recovery-partial-'}else{'KProAlert.partial-'}
+    $prefix+=$TransactionId+'-'
+    if($state.phase -cnotin @($fresh,$pending,$done)){throw 'Partial recovery phase rejected.'}
+    if(-not $state.PSObject.Properties[$property]){$state|Add-Member -NotePropertyName $property -NotePropertyValue ''}
+    if(-not $state.PSObject.Properties['partialEvidenceArchives']){$state|Add-Member -NotePropertyName partialEvidenceArchives -NotePropertyValue ([object[]]@())}
+    $history=@($state.partialEvidenceArchives)
+    $hasRoot=Test-Path -LiteralPath $installed
+    if($state.phase -ceq $fresh){
+        if(-not $hasRoot -or $history.Count -ge 8){throw 'No partial root or archive attempt limit reached.'}
+        Assert-PartialInstallation $installed $Package $ExpectedPackageHash $CandidateRoot
+        $archive=Join-Path $nativeProgramFiles ($prefix+[Guid]::NewGuid().ToString('N'))
+    }else{
+        $archive=[string]$state.$property
+        if([IO.Path]::GetDirectoryName($archive) -cne $nativeProgramFiles -or
+           [IO.Path]::GetFileName($archive) -cnotmatch ('^'+[regex]::Escape($prefix)+'[a-f0-9]{32}$')){throw 'Partial archive intent mismatch.'}
+    }
+    $hasArchive=Test-Path -LiteralPath $archive
+    if($hasRoot -and -not $hasArchive){
+        if($state.phase -ceq $done){throw 'Archived state has a new root; preserve both.'}
+        Assert-PartialInstallation $installed $Package $ExpectedPackageHash $CandidateRoot
+        $state.$property=$archive
+        Write-State $pending
+        Release-Files
+        [IO.Directory]::Move($installed,$archive)
+    }elseif(-not $hasRoot -and $hasArchive){
+        if($state.phase -ceq $fresh){throw 'Unbound partial archive.'}
+    }else{throw 'Ambiguous partial root/archive state; preserve evidence.'}
+    Assert-PartialInstallation $archive $Package $ExpectedPackageHash $CandidateRoot
+    if($archive -cnotin $history){$state.partialEvidenceArchives=@($history+@($archive))}
+    Write-State $done
+}
+
+function Abort-PartialFirstInstall($Package) {
+    if($state.operation -cne 'install' -or $state.phase -cnotin @('install_pending','partial_archive_pending','partial_archived','installation_aborted','validation_aborted')){
+        throw 'First-install abort state rejected.'
+    }
+    Assert-PartialRuntimeAbsent
+    if((Test-Path -LiteralPath $installed) -or $state.phase -cin @('partial_archive_pending','partial_archived')){
+        Archive-PartialInstallation $Package
+    }
+    Release-Files
+    Assert-RecoveryTargetAbsent
+    $state.installedVersion=''
+    Write-State $(if($candidateValidation){'validation_aborted'}else{'installation_aborted'})
+}
 function Snapshot([string]$InstalledHash,[string]$Expected='') {
     $args=@{ExpectedDeviceId=$ExpectedDeviceId;TransactionId=($TransactionId+$TransactionId);ManifestSha256=$InstalledHash}
     if($candidateValidation){$args.CandidatePermitPath=$CandidatePermitPath;$args.CandidatePermitSha256=$CandidatePermitSha256;$args.SourceManifestSha256=$SourceManifestSha256}
@@ -173,6 +353,20 @@ function Assert-OrdinaryService {
         try{if([int]$key.GetValue('LaunchProtected',0) -ne 0){throw 'PPL requires the service-internal upgrade transport.'}}
         finally{$key.Dispose()}
     }finally{$base.Dispose()}
+}
+function Resume-TransactionService([string]$ExpectedPackageHash) {
+    Assert-InstallRootMarker $installed $ExpectedPackageHash
+    Assert-OrdinaryService
+    $package=Read-Package $installed $ExpectedPackageHash
+    $layout=Get-KProPackageLayout -Architecture $ExpectedArchitecture
+    $service=Get-CimInstance Win32_Service -Filter "Name='KProSvc'" -ErrorAction Stop
+    if(-not $service -or $service.PathName -cne ('"'+(Join-Path $installed $layout.Service)+'"') -or
+       $service.State -cnotin @('Running','Stopped')){throw 'Transaction service identity/state rejected.'}
+    if($service.State -ceq 'Stopped'){
+        Start-Service -Name KProSvc -ErrorAction Stop
+        (Get-Service KProSvc -ErrorAction Stop).WaitForStatus('Running',[TimeSpan]::FromSeconds(90))
+    }
+    return $package
 }
 function Assert-Collector {
     $service=Get-CimInstance Win32_Service -Filter "Name='KProSvc'"
@@ -266,11 +460,11 @@ try {
     Assert-Protected $parent
     $transactionLock=[IO.File]::Open((Join-Path $parent 'lifecycle.lock'),'OpenOrCreate','ReadWrite','None')
     $transactionRoot=Join-Path $parent $TransactionId
-    $candidateInstallArgs=@{}
+    $candidateInstallArgs=@{LifecycleTransactionId=$TransactionId;ExpectedDeviceId=$ExpectedDeviceId;SourceManifestSha256=$SourceManifestSha256}
     if($candidateValidation) {
         $CandidatePermitPath=Join-Path $transactionRoot 'candidate-permit.ps1'
         $candidateInstallArgs=@{ValidateCandidate=$true;CandidatePermitPath=$CandidatePermitPath;CandidatePermitSha256=$CandidatePermitSha256;
-            ExpectedDeviceId=$ExpectedDeviceId;CandidateTransactionId=$TransactionId;CandidateOperation=$candidatePermit.operation;SourceManifestSha256=$SourceManifestSha256}
+            ExpectedDeviceId=$ExpectedDeviceId;CandidateTransactionId=$TransactionId;CandidateOperation=$candidatePermit.operation;SourceManifestSha256=$SourceManifestSha256;LifecycleTransactionId=$TransactionId}
     }
     if($Mode -in @('resume','rollback')) {
         Assert-Protected $transactionRoot
@@ -294,19 +488,35 @@ try {
         }
         if($Mode -eq 'rollback') {
             if(-not $Apply -or -not $Approve){throw 'Explicit recovery approval required.'}
+            if($state.operation -ceq 'install'){
+                Abort-PartialFirstInstall $new
+                $state|ConvertTo-Json -Depth 8 -Compress
+                return
+            }
             if($state.phase -cin @('prepared','backup_ready','uninstall_pending')) {
                 Cancel-UnchangedUpgrade
                 $state|ConvertTo-Json -Depth 8 -Compress
                 return
             }
             if($state.oldManifestSha256 -cnotmatch '^[a-f0-9]{64}$' -or
-               $state.phase -notin @('uninstalled','install_pending','awaiting_reboot')){throw 'Transaction not eligible for recovery.'}
+               $state.phase -notin @('uninstalled','install_pending','awaiting_reboot','partial_archive_pending','partial_archived',
+                                    'recovery_install_pending','recovery_partial_archive_pending','recovery_partial_archived')){throw 'Transaction not eligible for recovery.'}
             $recovery=Join-Path $transactionRoot 'recovery-package'
             Assert-Protected $recovery
             $oldPackage=Read-Package $recovery $state.oldManifestSha256
-            if(Get-Service KProSvc -ErrorAction SilentlyContinue) {
-                Assert-OrdinaryService
-                $null=Read-Package $installed $ManifestSha256
+            $continuingRecovery=$state.phase -cin @('recovery_install_pending','recovery_partial_archive_pending','recovery_partial_archived')
+            if($continuingRecovery -and (Get-Service KProSvc -ErrorAction SilentlyContinue)){
+                $null=Resume-TransactionService $state.oldManifestSha256
+                $null=Snapshot $state.oldManifestSha256 $state.policyDigest
+                Assert-Collector
+                $state.installedVersion=$oldPackage.version
+                $state.bootIdentity=$os.LastBootUpTime.ToUniversalTime().ToString('o')
+                Write-State 'recovery_awaiting_reboot'
+                $state|ConvertTo-Json -Depth 8 -Compress
+                return
+            }
+            if(-not $continuingRecovery -and (Get-Service KProSvc -ErrorAction SilentlyContinue)) {
+                $null=Resume-TransactionService $ManifestSha256
                 $null=Snapshot $ManifestSha256 $state.policyDigest
                 Release-Files
                 Write-State 'recovery_uninstall_pending'
@@ -314,7 +524,14 @@ try {
                 if($removed.mode -cne 'uninstalled' -or $removed.productAuthorized -ne $true){throw 'New product uninstall incomplete.'}
                 $state.recoveryEvidenceDirectory=$removed.evidenceDirectory
             }
-            if((Get-Service KProSvc,KProFilter -ErrorAction SilentlyContinue) -or (Test-Path -LiteralPath $installed)){throw 'Partial installation requires product recovery.'}
+            if(Get-Service KProSvc,KProFilter -ErrorAction SilentlyContinue){throw 'Partial installation requires product recovery.'}
+            if($continuingRecovery){
+                if((Test-Path -LiteralPath $installed) -or $state.phase -cin @('recovery_partial_archive_pending','recovery_partial_archived')){
+                    Archive-PartialInstallation $oldPackage -Recovery -ExpectedPackageHash $state.oldManifestSha256 -CandidateRoot $recovery
+                }
+            }elseif((Test-Path -LiteralPath $installed) -or $state.phase -cin @('partial_archive_pending','partial_archived')){
+                Archive-PartialInstallation $new
+            }
             Release-Files
             Assert-RecoveryTargetAbsent
             Write-State 'recovery_install_pending'
@@ -362,7 +579,7 @@ try {
     $state=[ordered]@{schema='FalconProLifecycleResult/v1';transactionId=$TransactionId;deviceId=$ExpectedDeviceId;
         sourceManifestSha256=$SourceManifestSha256;manifestSha256=$ManifestSha256;deliveryUserSid=$DeliveryUserSid;
         operation=$Mode;version=$new.version;architecture=$ExpectedArchitecture;installedVersion=$new.version;phase='prepared';updatedUtc='';oldManifestSha256='';policyDigest='';
-        bootIdentity=$os.LastBootUpTime.ToUniversalTime().ToString('o');evidenceDirectory='';recoveryEvidenceDirectory='';errorClass=''}
+        bootIdentity=$os.LastBootUpTime.ToUniversalTime().ToString('o');evidenceDirectory='';recoveryEvidenceDirectory='';partialEvidenceDirectory='';errorClass=''}
     if($candidateValidation){$state.schema='FalconProCandidateLifecycleResult/v1';$state.validationOnly=$true;$state.productionEligible=$false;$state.candidatePermitSha256=$CandidatePermitSha256}
     Write-State 'prepared'
     Copy-Package $PackageRoot (Join-Path $transactionRoot 'package') $new
@@ -400,7 +617,7 @@ try {
     }else{
         $installedResult=& (Join-Path $sourceRoot 'Install-FalconPro.ps1') -ExpectedDeviceId $ExpectedDeviceId `
         -SourceManifestSha256 $SourceManifestSha256 -PackageRoot (Join-Path $transactionRoot 'package') `
-        -ManifestSha256 $ManifestSha256 -DeliveryUserSid $DeliveryUserSid -ApproveInstallation -Apply -Confirm:$false | ConvertFrom-Json
+        -ManifestSha256 $ManifestSha256 -DeliveryUserSid $DeliveryUserSid -LifecycleTransactionId $TransactionId -ApproveInstallation -Apply -Confirm:$false | ConvertFrom-Json
     }
     if($installedResult.mode -cne 'service-running' -or $installedResult.driverRunning -ne $true -or
        $installedResult.collectorReady -ne $true){throw 'Installation runtime readback incomplete.'}

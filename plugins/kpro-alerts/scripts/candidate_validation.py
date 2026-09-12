@@ -18,6 +18,7 @@ $PSModuleAutoLoadingPreference='All'
 [Console]::OutputEncoding=New-Object Text.UTF8Encoding($false)
 $a=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('__ARGUMENTS__'))|ConvertFrom-Json
 $held=New-Object 'System.Collections.Generic.List[System.IDisposable]'
+$nativeExitCode=0
 try {
     $item=Get-Item -LiteralPath $a.Module
     while($null -ne $item){
@@ -33,8 +34,11 @@ try {
                        'PackageRoot','DeliveryUserSid','CandidatePermitPath','CandidatePermitSha256','Apply')){$invoke[$name]=$a.$name}
     $invoke.ApproveCandidateValidation=$true
     # All candidate PS1 signatures and hashes are checked and held BEFORE execution.
+    $global:LASTEXITCODE=0
     & (Join-Path $a.SourceRoot 'Invoke-FalconProCandidateValidation.ps1') @invoke
+    $nativeExitCode=$global:LASTEXITCODE
 }finally{foreach($handle in $held){$handle.Dispose()}}
+exit $nativeExitCode
 '''
 
 
@@ -48,8 +52,11 @@ def validate_result(reply, options):
     else:
         if (reply['schema'] != 'FalconProCandidateLifecycleResult/v1' or 'mode' in reply or
                 reply.get('productionEligible') is not False or reply.get('phase') not in (
-                    'awaiting_reboot','recovery_awaiting_reboot','validation_complete','validation_rolled_back','cancelled_no_change')):
+                    'awaiting_reboot','recovery_awaiting_reboot','validation_complete','validation_rolled_back','validation_aborted','cancelled_no_change')):
             raise ValueError('Invalid candidate lifecycle result')
+        if reply['phase']=='validation_aborted' and (reply.get('operation')!='install' or
+                reply.get('installedVersion')!='' or options['Mode']!='rollback'):
+            raise ValueError('Invalid candidate aborted-install outcome')
         for field, option in (('deviceId','ExpectedDeviceId'),('transactionId','TransactionId'),
                               ('architecture','ExpectedArchitecture'),('sourceManifestSha256','SourceManifestSha256'),
                               ('manifestSha256','ManifestSha256'),('candidatePermitSha256','CandidatePermitSha256')):

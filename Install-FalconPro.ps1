@@ -6,6 +6,7 @@ param(
     [Parameter(Mandatory)][string]$PackageRoot,
     [Parameter(Mandatory)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ManifestSha256,
     [Parameter(Mandatory)][ValidatePattern('^S-1-5-21-[0-9-]+$')][string]$DeliveryUserSid,
+    [ValidatePattern('^[a-f0-9]{32}$')][string]$LifecycleTransactionId,
     [switch]$ApproveInstallation,
     [switch]$Apply
 )
@@ -100,6 +101,11 @@ try {
 Assert-SourceFiles
 Assert-TargetAbsent
 $installArgs = @{PackageRoot=$PackageRoot; ManifestSha256=$ManifestSha256; DeliveryUserSid=$DeliveryUserSid}
+if($LifecycleTransactionId){
+    $installArgs.LifecycleTransactionId=$LifecycleTransactionId
+    $installArgs.ExpectedDeviceId=$ExpectedDeviceId
+    $installArgs.SourceManifestSha256=$SourceManifestSha256
+}
 $installer = Join-Path $PSScriptRoot 'Install-KProAlert.ps1'
 # Always run the existing signature, publisher, release and policy gates first.
 $plan = (& $installer @installArgs) | ConvertFrom-Json

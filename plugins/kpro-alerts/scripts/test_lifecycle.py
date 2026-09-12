@@ -128,6 +128,15 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(native.call_count,1)
         self.assertEqual(metrics.record.call_count,1)
 
+    def test_partial_rollback_reaches_native_authority_checks(self):
+        value=self.plan('upgrade')
+        for state in ('residual_install','partial_install','installed_not_running'):
+            native=Mock(return_value=dict(state='rolled_back'))
+            result=self.invoke(value,mode='rollback',executor=native,
+                               endpoint_probe=lambda _,state=state:dict(state=state,architecture='x64'))
+            self.assertEqual(result['state'],'rolled_back')
+            native.assert_called_once()
+
     def test_upgrades_do_not_inflate_installations(self):
         def event(kind,identity):
             return make_event(consent=True,installation_id='a'*32,event_id=identity*32,day=100,

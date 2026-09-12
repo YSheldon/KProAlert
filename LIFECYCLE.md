@@ -47,6 +47,16 @@ publisher verification. They do not change the machine execution policy or
 suppress UAC. Program Files is resolved from the native registry, not caller
 environment variables.
 
+The local launcher requests `runas` through Windows `ShellExecuteExW`, retaining
+normal UAC and zone checks. Only native `ERROR_CANCELLED` (1223) with no launched
+process returns `elevation_cancelled`, `operationStarted=false` and
+`outcomeUncertain=false`. This describes the current invocation; it does not
+erase or close an older pending transaction. No elevated receipt or registry
+state is read as a substitute for the user's cancelled launch. A started child
+that exits 1223 is not a UAC cancellation. Timeout, missing process handle and
+other launch/wait errors remain `attention_required` without automatic retry or
+forced process termination. A cancellation is never installation success.
+
 ## Four Clients
 
 `python falconpro.py setup --client <codex|grok|workbuddy|cursor> --database <local-db>`
@@ -83,6 +93,29 @@ it does not sign policy, force-unload drivers, delete broken partial installatio
 or permit an arbitrary downgrade. `recovery_awaiting_reboot` requires another
 normal reboot and `--resume` before `rolled_back` can be returned.
 
+New lifecycle-owned installs write an administrator-protected
+`.falconpro-install.json` before copying payloads. It binds the device,
+transaction, package and signed source manifest. Recovery may archive a partial
+root only when that marker matches, no service/process/filter remains, there are
+no unknown entries, reparse points or alternate data streams, and every present
+file is an exact file or prefix from the admitted new package. No partial file
+is executed. The root is atomically renamed to a transaction-specific archive,
+never deleted. `partial_archive_pending` records intent before the rename;
+recovery reconciles an existing bound archive instead of blindly repeating it.
+Each archive has a fresh suffix and is retained in the protected journal; at
+most eight partial archives are admitted for one transaction. A failed recovery
+installation is checked against the OLD recovery package and old marker hash,
+not the new package. Explicit rollback can archive that interrupted recovery and
+retry restoring the old package. If the old service already runs, the coordinator
+first revalidates its files, effective policy and collector instead of reinstalling.
+For a failed first install with no previous version, explicit rollback safely
+archives an admitted partial root and returns `installation_aborted` (candidate:
+`validation_aborted`); it does not invent an old package or installation success.
+Ambiguous roots, missing markers, mismatched bytes and unverified post-service
+failures still stop for product recovery. Existing unmarked installs are not
+silently adopted. The internal `LifecycleTransactionId` is supplied by the common
+coordinator, not by a policy server. Driver policy and event protocols are unchanged.
+
 For an interrupted upgrade in `prepared`, `backup_ready` or `uninstall_pending`,
 explicit `--rollback --apply --approve` may return `cancelled_no_change` only
 after revalidating the old installation's protected paths, signatures, all
@@ -100,6 +133,14 @@ before stopping protection; their service-internal uninstall transport still nee
 implementation/signing and separate native acceptance. Missing snapshot support,
 changed policy, partial installation or failed product uninstall preserves evidence
 and requires diagnosis. No ELAM driver is installed by this lifecycle.
+
+A recovery retry may resume an ordinary stopped service only after checking its
+transaction marker, device/source/package identities, full signed package and
+exact SCM executable path. Running recovery services need the same binding; an
+unmarked installation is never adopted. PPL, pending/unknown service states and
+failed starts preserve evidence rather than force-stop, delete or retry. This
+does not turn a first-install registered-service failure into a partial-directory
+archive: that state still requires product-authorized recovery.
 
 ## Optional Statistics
 
