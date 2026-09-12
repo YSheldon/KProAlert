@@ -272,7 +272,13 @@ Assert-KProInstallRootAcl (Get-Acl -LiteralPath $destination) $DeliveryUserSid
 Write-KProInstallRootMarker $destination
 foreach ($entry in $manifest.files) {
     $target = Join-Path $destination $entry.name
-    Copy-Item -LiteralPath (Join-Path $source $entry.name) -Destination $target
+    try { Copy-Item -LiteralPath (Join-Path $source $entry.name) -Destination $target }
+    catch {
+        # Copy-Item can report a null TargetObject; keep exact context private.
+        $_.Exception.Data['FalconPro.CopySource']=Join-Path $source $entry.name
+        $_.Exception.Data['FalconPro.CopyDestination']=$target
+        throw
+    }
     if ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -ne $entry.sha256) { throw 'Staged hash mismatch.' }
 }
 [IO.File]::WriteAllBytes((Join-Path $destination 'release-manifest.json'),$manifestBytes)
