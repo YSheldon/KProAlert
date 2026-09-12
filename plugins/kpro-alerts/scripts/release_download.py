@@ -9,7 +9,7 @@ import urllib.request
 import zipfile
 import os
 from spool import checked
-from release_platforms import architecture_for, layout, required_files
+from release_platforms import architecture_for, layout, layout_for_platform, required_files
 
 
 API='https://api.github.com/repos/YSheldon/KProAlert/releases/latest'
@@ -20,6 +20,7 @@ ONBOARDING={'Install-FalconPro.ps1','Install-KProAlert.ps1','onboarding-source.j
             'plugins/kpro-alerts/scripts/EndpointFacts.ps1','tools/KProReleaseTrust.psm1'}
 LIFECYCLE_ONBOARDING=ONBOARDING|{'Invoke-FalconProLifecycle.ps1','Uninstall-KProAlert.ps1',
             'plugins/kpro-alerts/scripts/Invoke-PolicySnapshot.ps1'}
+BOOTSTRAP_ONBOARDING=LIFECYCLE_ONBOARDING|{'falconpro.ps1'}
 
 
 def elevated():
@@ -131,7 +132,7 @@ def unpack(archive,target,allowed):
 def acquire(destination,verify_descriptor,*,fetch=read_url,platform='windows11-x64'):
     if elevated():raise ValueError('Download staging must run without elevation')
     architecture=architecture_for(platform)
-    target_layout=layout(architecture)
+    target_layout=layout_for_platform(platform)
     destination=Path(destination)
     checked(destination.parent)
     if destination.exists():raise FileExistsError('Use a new staging directory')
@@ -155,7 +156,7 @@ def acquire(destination,verify_descriptor,*,fetch=read_url,platform='windows11-x
             not urlsplit(a['url']).path.startswith(expected_prefix) for a in verified['assets'].values()):
         raise ValueError('Descriptor/assets do not belong to the discovered release tag')
     destination.mkdir(parents=False)
-    for kind,allowed in (('package',required_files(architecture)|PACKAGE_METADATA),('onboarding',ONBOARDING)):
+    for kind,allowed in (('package',required_files(architecture, platform)|PACKAGE_METADATA),('onboarding',ONBOARDING)):
         asset=verified['assets'][kind]
         payload=fetch(asset['url'],asset['size'])
         if len(payload)!=asset['size'] or hashlib.sha256(payload).hexdigest()!=asset['sha256']:
@@ -166,6 +167,8 @@ def acquire(destination,verify_descriptor,*,fetch=read_url,platform='windows11-x
             with zipfile.ZipFile(archive) as z:
                 if 'Invoke-FalconProLifecycle.ps1' in z.namelist():
                     allowed=LIFECYCLE_ONBOARDING
+                if 'falconpro.ps1' in z.namelist():
+                    allowed=BOOTSTRAP_ONBOARDING
         unpack(archive,destination/kind,allowed)
     for kind,name,key in (('package','release-manifest.json','packageManifestSha256'),
                           ('onboarding','onboarding-source.json','sourceManifestSha256')):

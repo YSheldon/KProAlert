@@ -28,13 +28,14 @@ $moduleBytes = Read-LockedInput $module 1048576
 $sha = [Security.Cryptography.SHA256]::Create()
 try { $moduleHash = ([BitConverter]::ToString($sha.ComputeHash($moduleBytes))).Replace('-','') }
 finally { $sha.Dispose() }
-if ($moduleHash -ine '979c2d8cfd7e19317ae8e5752bad59f6431ac92d69777b5661b27ed7e1dd2639') { throw 'Native trust module mismatch.' }
+if ($moduleHash -ine '9403c82406972819dba630231250699717531c5761c8a781bc9763fb8bdd21f0') { throw 'Native trust module mismatch.' }
 Import-Module $module -Force
 $nativeProgramFiles=Get-KProNativeProgramFiles
 Assert-KProProgramFilesRoot $nativeProgramFiles
 $nativeSystemRoot=[IO.Path]::GetFullPath([string](Get-CimInstance Win32_OperatingSystem).WindowsDirectory)
 $driverPaths=@(
     [IO.Path]::GetFullPath((Join-Path $nativeSystemRoot 'System32\drivers\KProFilter.sys'))
+    [IO.Path]::GetFullPath((Join-Path $nativeSystemRoot 'System32\drivers\KProFilter32.sys'))
     [IO.Path]::GetFullPath((Join-Path $nativeSystemRoot 'System32\drivers\KProFilterArm.sys'))
 )
 $root = Join-Path $nativeProgramFiles 'KProAlert'
@@ -45,7 +46,7 @@ foreach ($path in @($root,$manifest)) {
 }
 if ((Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash -ne $ManifestSha256) { throw 'Installed manifest mismatch.' }
 $package = Get-Content -LiteralPath $manifest -Raw -Encoding UTF8 | ConvertFrom-Json
-$layout = Get-KProPackageLayout -Architecture $package.architecture
+$layout = Get-KProPackageLayout -Architecture $package.architecture -Platform $package.platform
 $entry = @($package.files | Where-Object {$_.name -ceq $layout.Service})
 $exe = Join-Path $root $layout.Service
 if ($entry.Count -ne 1 -or (Get-FileHash -LiteralPath $exe).Hash -ne $entry[0].sha256) { throw 'Installed service hash mismatch.' }

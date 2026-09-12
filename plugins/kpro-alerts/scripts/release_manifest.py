@@ -2,18 +2,19 @@
 import hashlib
 import re
 from pathlib import Path
-from release_platforms import layout, required_files
+from release_platforms import layout, layout_for_platform, required_files
 
 REQUIRED = required_files('x64')
 GATES = {'serviceF1ArtifactProduct', 'driverMicrosoftProduct', 'dllProduct',
          'policySignature', 'endToEnd', 'privateRawEventSpool'}
 
 
-def validate(manifest, root, architecture):
+def validate(manifest, root, architecture, platform=None):
     if manifest.get('schema') != 'KProAlertRelease/v1' or manifest.get('releaseStatus') != 'verified':
         raise ValueError('unverified release manifest')
-    target = layout(architecture)
-    required = required_files(architecture)
+    platform = platform or layout(architecture)['platform']
+    target = layout_for_platform(platform)
+    required = required_files(architecture, platform)
     if manifest.get('architecture') != architecture or manifest.get('platform') != target['platform']:
         raise ValueError('package architecture mismatch')
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?', str(manifest.get('version'))):

@@ -156,7 +156,7 @@ $attestationBytes = Read-LockedInput $attestationPath 65536
 $trustModule=Join-Path $PSScriptRoot 'tools/KProReleaseTrust.psm1'
 Assert-PlainPath $trustModule
 $null=Read-LockedInput $trustModule 1048576
-if ((Get-FileHash -LiteralPath $trustModule).Hash -ine '979c2d8cfd7e19317ae8e5752bad59f6431ac92d69777b5661b27ed7e1dd2639') { throw 'Native trust module mismatch.' }
+if ((Get-FileHash -LiteralPath $trustModule).Hash -ine '9403c82406972819dba630231250699717531c5761c8a781bc9763fb8bdd21f0') { throw 'Native trust module mismatch.' }
 Import-Module $trustModule -Force
 $attestationIdentity = Assert-KProReleaseAttestation -Bytes $attestationBytes
 $attestationText = ConvertFrom-KProAttestationText -Bytes $attestationBytes
@@ -167,20 +167,19 @@ if ($attestedHashes.Count -ne 1 -or $attestedHashes[0].Groups[1].Value -ne $Mani
 }
 # The attestation is data only: never invoke or dot-source it.
 $manifest = [Text.Encoding]::UTF8.GetString($manifestBytes).TrimStart([char]0xfeff) | ConvertFrom-Json
-if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
-    throw 'Use native 64-bit PowerShell for installation on this OS.'
-}
-if ([Environment]::OSVersion.Version.Major -lt 10) { throw 'This installer requires Windows 10 or later.' }
 $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
 $script:NativeSystemRoot=[IO.Path]::GetFullPath([string]$os.WindowsDirectory)
 $processorArchitectures = @(Get-CimInstance Win32_Processor -ErrorAction Stop | Select-Object -ExpandProperty Architecture -Unique)
-if ($os.ProductType -ne 1 -or [int]$os.BuildNumber -lt 22000 -or
-    $processorArchitectures.Count -ne 1 -or $processorArchitectures[0] -notin @(9,12)) {
-    throw 'This installer supports Windows 11 x64 and ARM64 workstations.'
+if ($processorArchitectures.Count -ne 1 -or $processorArchitectures[0] -notin @(0,9,12)) {
+    throw 'Unable to determine a supported native processor architecture.'
 }
-$arch = if ($processorArchitectures[0] -eq 12) { 'arm64' } else { 'x64' }
-$layout = Get-KProPackageLayout -Architecture $arch
-if ($manifest.platform -cne $layout.Platform) { throw 'Release platform does not match the native OS.' }
+$arch = switch ([int]$processorArchitectures[0]) { 0 { 'x86' } 9 { 'x64' } 12 { 'arm64' } }
+if (($arch -in @('x64','arm64')) -and [Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
+    throw 'Use native 64-bit PowerShell for this endpoint.'
+}
+$platform = Get-KProPlatformForWindows -OsVersion ([Version]$os.Version) -BuildNumber ([int]$os.BuildNumber) -Architecture $arch -ProductType ([int]$os.ProductType)
+$layout = Get-KProPackageLayout -Architecture $arch -Platform $platform
+if ($manifest.platform -cne $platform) { throw 'Release platform does not match the native OS.' }
 $candidate = $ValidateCandidate -and $manifest.releaseStatus -eq 'candidate'
 if($ValidateCandidate) {
     if(-not $CandidatePermitPath -or -not $CandidatePermitSha256 -or -not $ExpectedDeviceId -or
@@ -230,6 +229,9 @@ foreach ($entry in $manifest.files) {
     if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $entry.sha256) { throw 'File hash mismatch.' }
     if ([IO.Path]::GetExtension($path) -in @('.exe','.dll','.sys')) {
         Assert-KProPeArchitecture -Bytes $captured -Architecture $arch
+        if([IO.Path]::GetExtension($path) -in @('.exe','.dll')){
+            Assert-KProPeArchitecture -Bytes $captured -Architecture $arch -RequireForceIntegrity (-not $layout.Legacy)
+        }
         if ((Get-AuthenticodeSignature -LiteralPath $path).Status -ne 'Valid') { throw 'Windows signature validation failed.' }
     }
 }
@@ -243,7 +245,7 @@ Assert-KProProgramFilesRoot $nativeProgramFiles
 $destination = Join-Path $nativeProgramFiles 'KProAlert'
 if (Test-Path -LiteralPath $destination) { throw 'Destination exists; refusing to overwrite.' }
 $installationIntent=Read-KProInstallIntent
-$plan = [ordered]@{mode='verified-plan';attestationIdentity=$attestationIdentity;candidateValidation=[bool]$ValidateCandidate;architecture=$arch;version=$manifest.version;destination=$destination;
+$plan = [ordered]@{mode='verified-plan';attestationIdentity=$attestationIdentity;candidateValidation=[bool]$ValidateCandidate;architecture=$arch;platform=$platform;legacy=[bool]$layout.Legacy;version=$manifest.version;destination=$destination;
     installsDriver=$true;installsElamDriver=$false;automaticAiRemediation=$false;requiresAdministrator=$true;
     deliveryUserSid=$DeliveryUserSid}
 if (-not $Apply) { $plan | ConvertTo-Json; return }

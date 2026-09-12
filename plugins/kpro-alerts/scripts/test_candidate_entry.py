@@ -40,7 +40,7 @@ class CandidateEntryTests(unittest.TestCase):
             permit=json.loads(base64.b64decode(raw.decode().split('FALCONPRO-CANDIDATE-JSON: ')[1]))
             self.assertEqual(permit['sourceManifestSha256'],builder.digest(source))
             self.assertEqual(len(permit['packages'][0]['files']),5)
-            self.assertEqual(len(json.loads(source)['files']),8)
+            self.assertEqual(len(json.loads(source)['files']),9)
             self.assertNotIn('verified',raw.decode())
 
     def test_rejects_tamper_and_missing_old_upgrade(self):

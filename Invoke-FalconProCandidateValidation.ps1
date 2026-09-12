@@ -6,7 +6,7 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{32}$')][string]$TransactionId,
     [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{64}$')][string]$SourceManifestSha256,
     [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{64}$')][string]$ManifestSha256,
-    [Parameter(Mandatory)][ValidateSet('x64','arm64')][string]$ExpectedArchitecture,
+    [Parameter(Mandatory)][ValidateSet('x86','x64','arm64')][string]$ExpectedArchitecture,
     [Parameter(Mandatory)][string]$PackageRoot,
     [Parameter(Mandatory)][ValidatePattern('^S-1-5-21-[0-9-]+$')][string]$DeliveryUserSid,
     [Parameter(Mandatory)][string]$CandidatePermitPath,
@@ -26,7 +26,7 @@ try {
         if($item -is [IO.FileInfo]){$item=$item.Directory}else{$item=$item.Parent}
     }
     $stream=[IO.File]::Open($module,'Open','Read','Read');$held.Add($stream)
-    if((Get-FileHash -LiteralPath $module).Hash -ine '979c2d8cfd7e19317ae8e5752bad59f6431ac92d69777b5661b27ed7e1dd2639'){throw 'Native trust module mismatch.'}
+    if((Get-FileHash -LiteralPath $module).Hash -ine '9403c82406972819dba630231250699717531c5761c8a781bc9763fb8bdd21f0'){throw 'Native trust module mismatch.'}
     Import-Module $module -Force
     $permit=Get-KProCandidatePermit $CandidatePermitPath $CandidatePermitSha256 $ExpectedDeviceId $TransactionId $ExpectedArchitecture $SourceManifestSha256 $Mode $PSScriptRoot $held
     if($permit.packages[0].manifestSha256 -cne $ManifestSha256){throw 'Candidate target mismatch.'}

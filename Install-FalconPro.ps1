@@ -8,11 +8,30 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^S-1-5-21-[0-9-]+$')][string]$DeliveryUserSid,
     [ValidatePattern('^[a-f0-9]{32}$')][string]$LifecycleTransactionId,
     [switch]$ApproveInstallation,
+    [switch]$NativeRelaunched,
     [switch]$Apply
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $inputHandles=New-Object 'System.Collections.Generic.List[System.IDisposable]'
+
+# A 32-bit AI host on a 64-bit Windows endpoint must not select x86 binaries by
+# WOW64 redirection. Re-enter this signed script through Sysnative first.
+if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess -and -not $NativeRelaunched) {
+    $nativeWindows=[string](Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).WindowsDirectory
+    $nativePowerShell=Join-Path $nativeWindows 'Sysnative\WindowsPowerShell\v1.0\powershell.exe'
+    if (-not (Test-Path -LiteralPath $nativePowerShell -PathType Leaf)) { throw 'Native 64-bit PowerShell is unavailable.' }
+    $arguments=@('-NoProfile','-NonInteractive','-ExecutionPolicy','RemoteSigned','-File',$PSCommandPath,
+        '-ExpectedDeviceId',$ExpectedDeviceId,'-SourceManifestSha256',$SourceManifestSha256,
+        '-PackageRoot',$PackageRoot,'-ManifestSha256',$ManifestSha256,'-DeliveryUserSid',$DeliveryUserSid,
+        '-NativeRelaunched')
+    if($LifecycleTransactionId){$arguments+=@('-LifecycleTransactionId',$LifecycleTransactionId)}
+    if($ApproveInstallation){$arguments+='-ApproveInstallation'}
+    if($Apply){$arguments+='-Apply'}
+    if($WhatIfPreference){$arguments+='-WhatIf'}
+    & $nativePowerShell @arguments
+    exit $LASTEXITCODE
+}
 
 function Read-LockedInput([string]$Path,[int]$Maximum) {
     $stream=[IO.File]::Open($Path,'Open','Read','Read')
@@ -47,11 +66,12 @@ function Assert-SourceFiles {
     $manifest = [Text.Encoding]::UTF8.GetString($manifestBytes).TrimStart([char]0xfeff) | ConvertFrom-Json
     $names = @('Install-FalconPro.ps1','Install-KProAlert.ps1',
         'plugins/kpro-alerts/scripts/EndpointFacts.ps1','tools/KProReleaseTrust.psm1')
-    if ($manifest.schema -ceq 'FalconProOnboardingSource/v2') {
+    if ($manifest.schema -cin @('FalconProOnboardingSource/v2','FalconProOnboardingSource/v3')) {
         $names += @('Invoke-FalconProLifecycle.ps1','Uninstall-KProAlert.ps1',
             'plugins/kpro-alerts/scripts/Invoke-PolicySnapshot.ps1')
     }
-    if ($manifest.schema -cnotin @('FalconProOnboardingSource/v1','FalconProOnboardingSource/v2') -or @($manifest.files).Count -ne $names.Count) {
+    if($manifest.schema -ceq 'FalconProOnboardingSource/v3'){$names+='falconpro.ps1'}
+    if ($manifest.schema -cnotin @('FalconProOnboardingSource/v1','FalconProOnboardingSource/v2','FalconProOnboardingSource/v3') -or @($manifest.files).Count -ne $names.Count) {
         throw 'Unsupported onboarding source manifest.'
     }
     $seen = @{}
@@ -75,7 +95,7 @@ function Assert-SourceFiles {
         }
     }
     $trustModule=Join-Path $PSScriptRoot 'tools/KProReleaseTrust.psm1'
-    if ((Get-FileHash -LiteralPath $trustModule).Hash -ine '979c2d8cfd7e19317ae8e5752bad59f6431ac92d69777b5661b27ed7e1dd2639') {
+    if ((Get-FileHash -LiteralPath $trustModule).Hash -ine '9403c82406972819dba630231250699717531c5761c8a781bc9763fb8bdd21f0') {
         throw 'Native trust module mismatch.'
     }
     Import-Module $trustModule -Force
@@ -87,7 +107,7 @@ function Assert-SourceFiles {
 }
 function Assert-TargetAbsent {
     $facts = (& (Join-Path $PSScriptRoot 'plugins\kpro-alerts\scripts\EndpointFacts.ps1')) | ConvertFrom-Json
-    if ($facts.schema -cne 'FalconProEndpointFacts/v1' -or
+    if ($facts.schema -cne 'FalconProEndpointFacts/v2' -or
         $facts.deviceId -cne $ExpectedDeviceId -or $facts.supported -isnot [bool] -or
         -not $facts.supported -or $facts.service -cne 'absent' -or $facts.driver -cne 'absent' -or
         $facts.conflicts -isnot [bool] -or $facts.conflicts -or
@@ -112,8 +132,7 @@ $plan = (& $installer @installArgs) | ConvertFrom-Json
 if ($plan.mode -cne 'verified-plan' -or $plan.candidateValidation -ne $false) {
     throw 'Only an admitted production release can be offered for installation.'
 }
-if ($plan.version -cne $approvedDescriptor.version -or
-    ('windows11-'+$plan.architecture) -cne $approvedDescriptor.platform) {
+if ($plan.version -cne $approvedDescriptor.version -or $plan.platform -cne $approvedDescriptor.platform) {
     throw 'Installation version/platform differs from the approved descriptor.'
 }
 if (-not $Apply) {

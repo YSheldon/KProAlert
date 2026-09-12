@@ -9,6 +9,10 @@ preview, not a verified one-click protection release.
 Requires Python 3.10+ on the AI tool execution host, independently of the driver's
 Windows compatibility matrix. Python/MCP installation on Win7 is not supported here.
 
+Endpoint installation can instead use the Python-free `falconpro.ps1` entry.
+See [WINDOWS-COMPATIBILITY.md](WINDOWS-COMPATIBILITY.md) for prerequisites,
+architecture-specific package selection and the native acceptance boundary.
+
 ```powershell
 git clone --branch codex/public-preview https://github.com/YSheldon/KProAlert.git
 cd KProAlert

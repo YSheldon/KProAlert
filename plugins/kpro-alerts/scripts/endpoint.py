@@ -5,31 +5,47 @@ from pathlib import Path
 import re
 import subprocess
 from windows_tools import native_tool
+from release_platforms import layout, layout_for_platform, platform_for_os
 
 
-def _result(state, device_id=None, architecture=None):
+def _result(state, device_id=None, architecture=None, platform=None):
     return dict(schema='FalconProEndpointStatus/v1', state=state,
                 deviceId=device_id, executionHostOnly=True,
                 installEligible=state == 'not_installed',
                 automaticInstallAuthorized=False, requiresFirstInstallConsent=True,
-                protectionVerified=False, architecture=architecture)
+                protectionVerified=False, architecture=architecture, platform=platform)
 
 
 def classify(facts, expected_device_id):
-    if not isinstance(facts, dict) or facts.get('schema') != 'FalconProEndpointFacts/v1':
+    if not isinstance(facts, dict) or facts.get('schema') not in ('FalconProEndpointFacts/v1', 'FalconProEndpointFacts/v2'):
         return _result('unknown')
     device=facts.get('deviceId')
     if not isinstance(device,str) or not re.fullmatch('[a-f0-9]{64}',device):
         return _result('unknown')
     architecture = facts.get('architecture')
+    platform = facts.get('platform')
     if any(type(facts.get(k)) is not bool for k in ('supported','conflicts','residualFiles')):
         return _result('unknown',device)
     if any(facts.get(k) not in ('absent','running','stopped','unknown') for k in ('service','driver')):
         return _result('unknown',device)
-    if facts['supported'] and architecture not in ('x64', 'arm64'):
+    if facts['supported'] and architecture not in ('x86', 'x64', 'arm64'):
         return _result('unknown',device)
+    if facts['supported']:
+        if facts['schema']=='FalconProEndpointFacts/v1' and architecture in ('x64', 'arm64'):
+            platform = layout(architecture)['platform']
+        try:
+            target = layout_for_platform(platform)
+            if target['architecture'] != architecture:
+                raise ValueError('Architecture mismatch')
+            if facts['schema']=='FalconProEndpointFacts/v1' and architecture not in ('x64','arm64'):
+                raise ValueError('Old receipts do not admit x86')
+            if facts['schema']=='FalconProEndpointFacts/v2' and platform_for_os(
+                    facts.get('osVersion'),facts.get('buildNumber'),architecture,facts.get('productType')) != platform:
+                raise ValueError('OS facts mismatch')
+        except (TypeError, ValueError):
+            return _result('unknown', device, architecture)
     def result(state):
-        return _result(state, device, architecture)
+        return _result(state, device, architecture, platform)
     if not expected_device_id:
         return result('target_unbound')
     if not isinstance(expected_device_id,str) or not re.fullmatch('[a-f0-9]{64}',expected_device_id):

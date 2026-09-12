@@ -11,9 +11,9 @@ import zipfile
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'plugins/kpro-alerts/scripts'))
 from build_onboarding_manifest import build, NAMES
 from lifecycle import read_json, verify_entry, validate_sources
-from release_download import PACKAGE_METADATA, LIFECYCLE_ONBOARDING, validate_descriptor
+from release_download import PACKAGE_METADATA, BOOTSTRAP_ONBOARDING, validate_descriptor
 from release_manifest import validate
-from release_platforms import layout, required_files
+from release_platforms import PLATFORM_LAYOUTS, layout, layout_for_platform, required_files
 
 
 def digest(path):
@@ -36,8 +36,8 @@ def assemble(package,sources,destination,tag):
     package=Path(package);sources=Path(sources);destination=Path(destination)
     manifest=read_json(package/'release-manifest.json')
     architecture=manifest.get('architecture')
-    target=layout(architecture)
-    validate(manifest,package,architecture)
+    target=layout_for_platform(manifest.get('platform'))
+    validate(manifest,package,architecture,target['platform'])
     # Native publisher trust is evaluated on final signed inputs, before packaging.
     verify_entry(package/'release-attestation.ps1')
     for name in NAMES:
@@ -46,8 +46,8 @@ def assemble(package,sources,destination,tag):
     destination.mkdir(exist_ok=False)
     package_zip=destination/target['archive']
     source_zip=destination/'FalconPro-Onboarding.zip'
-    archive(package,required_files(architecture)|PACKAGE_METADATA,package_zip)
-    archive(sources,LIFECYCLE_ONBOARDING,source_zip,{'onboarding-source.json':source_manifest})
+    archive(package,required_files(architecture, manifest.get('platform'))|PACKAGE_METADATA,package_zip)
+    archive(sources,BOOTSTRAP_ONBOARDING,source_zip,{'onboarding-source.json':source_manifest})
     prefix='https://github.com/YSheldon/KProAlert/releases/download/'+tag+'/'
     assets={}
     for name,path in (('package',package_zip),('onboarding',source_zip)):
@@ -63,18 +63,19 @@ def assemble(package,sources,destination,tag):
                 packageSha256=assets['package']['sha256'],onboardingSha256=assets['onboarding']['sha256'])
 
 
-def verify_bundle(destination,architecture='x64'):
+def verify_bundle(destination,architecture='x64',platform=None):
     from bootstrap import verify_descriptor
     from release_download import unpack
     import tempfile
     root=Path(destination)
-    target=layout(architecture)
+    target=layout_for_platform(platform) if platform else layout(architecture)
+    architecture=target['architecture']
     descriptor=validate_descriptor(verify_descriptor((root/target['descriptor']).read_bytes()))
     if descriptor['platform']!=target['platform']:raise ValueError('Bundle architecture mismatch')
     # Explicitly validate extracted bytes and the signed source manifest before publication.
     with tempfile.TemporaryDirectory(prefix='FalconPro-publish-check-') as folder:
-        for kind,names,filename in (('package',required_files(architecture)|PACKAGE_METADATA,target['archive']),
-                                   ('onboarding',LIFECYCLE_ONBOARDING,'FalconPro-Onboarding.zip')):
+        for kind,names,filename in (('package',required_files(architecture, target['platform'])|PACKAGE_METADATA,target['archive']),
+                                   ('onboarding',BOOTSTRAP_ONBOARDING,'FalconPro-Onboarding.zip')):
             asset=descriptor['assets'][kind]
             path=root/filename
             if not asset['url'].endswith('/'+filename) or path.stat().st_size!=asset['size'] or digest(path)!=asset['sha256']:
@@ -82,7 +83,7 @@ def verify_bundle(destination,architecture='x64'):
             unpack(path,Path(folder)/kind,names)
         package=Path(folder)/'package'
         if digest(package/'release-manifest.json')!=descriptor['packageManifestSha256']:raise ValueError('Manifest differs')
-        validate(read_json(package/'release-manifest.json'),package,architecture)
+        validate(read_json(package/'release-manifest.json'),package,architecture,target['platform'])
         validate_sources(Path(folder)/'onboarding',descriptor['sourceManifestSha256'])
     return dict(state='signed_bundle_verified',published=False,version=descriptor['version'])
 
@@ -94,9 +95,10 @@ if __name__=='__main__':
     parser.add_argument('--output',required=True)
     parser.add_argument('--tag')
     parser.add_argument('--verify',action='store_true')
-    parser.add_argument('--architecture',choices=['x64','arm64'],default='x64',help='Platform whose signed bundle to verify')
+    parser.add_argument('--architecture',choices=['x86','x64','arm64'],default='x64',help='Architecture whose signed bundle to verify')
+    parser.add_argument('--platform',choices=sorted(PLATFORM_LAYOUTS),help='Exact OS package platform')
     args=parser.parse_args()
-    if args.verify:result=verify_bundle(args.output,args.architecture)
+    if args.verify:result=verify_bundle(args.output,args.architecture,args.platform)
     else:
         if not all((args.package,args.signed_sources,args.tag)):parser.error('package, signed-sources and tag required')
         result=assemble(args.package,args.signed_sources,args.output,args.tag)

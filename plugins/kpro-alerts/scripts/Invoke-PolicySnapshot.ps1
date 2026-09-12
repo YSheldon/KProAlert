@@ -97,8 +97,8 @@ try {
     $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
     $principal=New-Object Security.Principal.WindowsPrincipal($identity)
     if(-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator) -or
-        -not [Environment]::Is64BitOperatingSystem -or -not [Environment]::Is64BitProcess) {
-        throw 'Elevated 64-bit Windows execution required.'
+        ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess)) {
+        throw 'Elevated native Windows execution required.'
     }
     $base=[Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine','Registry64')
     try {
@@ -116,9 +116,9 @@ try {
     Assert-ProtectedPath $PSCommandPath
     $root=Join-Path $programFiles 'KProAlert'
     $cpus=@(Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Architecture -Unique)
-    if($cpus.Count -ne 1 -or $cpus[0] -notin @(9,12)){throw 'Unsupported native architecture.'}
-    $architecture=if($cpus[0] -eq 12){'arm64'}else{'x64'}
-    $serviceName=if($architecture -eq 'arm64'){'KProSvcArm.exe'}else{'KProSvc.exe'}
+    if($cpus.Count -ne 1 -or $cpus[0] -notin @(0,9,12)){throw 'Unsupported native architecture.'}
+    $architecture=switch([int]$cpus[0]){0{'x86'}9{'x64'}12{'arm64'}}
+    $serviceName=switch($architecture){'arm64'{'KProSvcArm.exe'}'x86'{'KProSvc32.exe'}default{'KProSvc.exe'}}
     $exe=Join-Path $root $serviceName
     $service=Get-CimInstance Win32_Service -Filter "Name='KProSvc'"
     if($null -eq $service -or $service.State -ne 'Running' -or $service.ProcessId -eq 0 -or
@@ -130,11 +130,13 @@ try {
     $module=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../tools/KProReleaseTrust.psm1'))
     $moduleBytes=Read-Locked $module 65536
     # Bound helper dependency; updating it requires a new reviewed/signed helper.
-    if((Get-Digest $moduleBytes) -cne '979c2d8cfd7e19317ae8e5752bad59f6431ac92d69777b5661b27ed7e1dd2639') {
+    if((Get-Digest $moduleBytes) -cne '9403c82406972819dba630231250699717531c5761c8a781bc9763fb8bdd21f0') {
         throw 'Native trust module mismatch.'
     }
     Import-Module $module -Force
-    $layout=Get-KProPackageLayout -Architecture $architecture
+    $os=Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+    $platform=Get-KProPlatformForWindows ([Version]$os.Version) ([int]$os.BuildNumber) $architecture ([int]$os.ProductType)
+    $layout=Get-KProPackageLayout -Architecture $architecture -Platform $platform
     $attestation=Read-Locked (Join-Path $root 'release-attestation.ps1') 65536
     $null=Assert-KProReleaseAttestation -Bytes $attestation
     $text=ConvertFrom-KProAttestationText -Bytes $attestation
@@ -166,6 +168,9 @@ try {
         $seen[$file.name]=$true
         $bytes=Read-Locked (Join-Path $root $file.name) 67108864
         if($bytes.Length -ne $file.size -or (Get-Digest $bytes) -ne $file.sha256){throw 'Installed file drift.'}
+        if([IO.Path]::GetExtension($file.name) -in @('.exe','.dll')){
+            Assert-KProPeArchitecture -Bytes $bytes -Architecture $architecture -RequireForceIntegrity (-not $layout.Legacy)
+        }
     }
     if((Get-AuthenticodeSignature -LiteralPath $exe).Status -ne 'Valid'){throw 'Service signature failed.'}
     $child=New-Object Diagnostics.Process

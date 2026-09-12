@@ -30,7 +30,7 @@ def validate_event(event):
     if type(event['simulated']) is not bool:
         raise ValueError('Explicit simulation marker required')
     for key, allowed in (('kind',KINDS),('state',STATES),('architecture',{'x86','x64','arm64'}),
-                         ('osFamily',{'windows7','windows10','windows11','windows_server'})):
+                         ('osFamily',{'windows7','windows81','windows10','windows11','windows_server'})):
         if not isinstance(event[key],str) or event[key] not in allowed:
             raise ValueError('Unsupported metrics enum')
     if not isinstance(event['version'],str) or not re.fullmatch(r'[0-9]{1,5}(?:\.[0-9]{1,5}){3}',event['version']):

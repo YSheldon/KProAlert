@@ -6,7 +6,8 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{32}$')][string]$TransactionId,
     [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{64}$')][string]$SourceManifestSha256,
     [Parameter(Mandatory)][ValidatePattern('^[a-f0-9]{64}$')][string]$ManifestSha256,
-    [Parameter(Mandatory)][ValidateSet('x64','arm64')][string]$ExpectedArchitecture,
+    [Parameter(Mandatory)][ValidateSet('x86','x64','arm64')][string]$ExpectedArchitecture,
+    [string]$ExpectedPlatform,
     [Parameter(Mandatory)][string]$PackageRoot,
     [Parameter(Mandatory)][ValidatePattern('^S-1-5-21-[0-9-]+$')][string]$DeliveryUserSid,
     [switch]$Approve,
@@ -115,7 +116,7 @@ function Read-Package([string]$Root,[string]$Expected) {
     $bindings=@([regex]::Matches($text,'(?m)^# KPRO-MANIFEST-SHA256: ([A-Fa-f0-9]{64})\r?$'))
     if($bindings.Count -ne 1 -or $bindings[0].Groups[1].Value -ine $Expected){throw 'Attestation mismatch.'}
     $manifest=Decode $bytes
-    $layout=Get-KProPackageLayout -Architecture $ExpectedArchitecture
+    $layout=Get-KProPackageLayout -Architecture $ExpectedArchitecture -Platform $nativePlatform
     if($manifest.schema -cne 'KProAlertRelease/v1' -or ($manifest.releaseStatus -cne 'verified' -and -not $candidateValidation) -or
         $manifest.platform -cne $layout.Platform -or $manifest.architecture -cne $ExpectedArchitecture -or
         $manifest.version -cnotmatch '^(0|[1-9][0-9]{0,4})(\.(0|[1-9][0-9]{0,4})){3}$'){throw 'Package release rejected.'}
@@ -135,6 +136,9 @@ function Read-Package([string]$Root,[string]$Expected) {
         if($content.Length -ne $entry.size -or (Digest $content) -ine $entry.sha256){throw 'Package file mismatch.'}
         if([IO.Path]::GetExtension($path) -in @('.exe','.dll','.sys')) {
             Assert-KProPeArchitecture -Bytes $content -Architecture $ExpectedArchitecture
+            if([IO.Path]::GetExtension($path) -in @('.exe','.dll')){
+                Assert-KProPeArchitecture -Bytes $content -Architecture $ExpectedArchitecture -RequireForceIntegrity (-not $layout.Legacy)
+            }
             if((Get-AuthenticodeSignature -LiteralPath $path).Status -ne 'Valid'){throw 'Package signature invalid.'}
         }
     }
@@ -358,7 +362,7 @@ function Resume-TransactionService([string]$ExpectedPackageHash) {
     Assert-InstallRootMarker $installed $ExpectedPackageHash
     Assert-OrdinaryService
     $package=Read-Package $installed $ExpectedPackageHash
-    $layout=Get-KProPackageLayout -Architecture $ExpectedArchitecture
+    $layout=Get-KProPackageLayout -Architecture $ExpectedArchitecture -Platform $nativePlatform
     $service=Get-CimInstance Win32_Service -Filter "Name='KProSvc'" -ErrorAction Stop
     if(-not $service -or $service.PathName -cne ('"'+(Join-Path $installed $layout.Service)+'"') -or
        $service.State -cnotin @('Running','Stopped')){throw 'Transaction service identity/state rejected.'}
@@ -403,7 +407,7 @@ function Cancel-UnchangedUpgrade {
 }
 function Assert-RecoveryTargetAbsent {
     $facts=& (Join-Path $sourceRoot 'plugins/kpro-alerts/scripts/EndpointFacts.ps1') | ConvertFrom-Json
-    if($facts.schema -cne 'FalconProEndpointFacts/v1' -or $facts.deviceId -cne $ExpectedDeviceId -or
+    if($facts.schema -cne 'FalconProEndpointFacts/v2' -or $facts.deviceId -cne $ExpectedDeviceId -or $facts.platform -cne $nativePlatform -or
        $facts.architecture -cne $ExpectedArchitecture -or $facts.supported -ne $true -or
        $facts.service -cne 'absent' -or $facts.driver -cne 'absent' -or
        $facts.conflicts -ne $false -or $facts.residualFiles -ne $false) {throw 'Recovery target is not cleanly absent.'}
@@ -421,8 +425,8 @@ try {
     if((Digest ([Text.Encoding]::UTF8.GetBytes('FalconPro-device-v1:'+$guid.ToLowerInvariant()))) -cne $ExpectedDeviceId){throw 'Device mismatch.'}
     $os=Get-CimInstance Win32_OperatingSystem
     $arch=@(Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Architecture -Unique)
-    if(-not [Environment]::Is64BitProcess -or $arch.Count -ne 1 -or $arch[0] -notin @(9,12) -or $os.ProductType -ne 1 -or [int]$os.BuildNumber -lt 22000){throw 'Unsupported native platform.'}
-    $nativeArchitecture=if($arch[0] -eq 12){'arm64'}else{'x64'}
+    if(([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) -or $arch.Count -ne 1 -or $arch[0] -notin @(0,9,12)){throw 'Unsupported native architecture.'}
+    $nativeArchitecture=switch([int]$arch[0]){0{'x86'}9{'x64'}12{'arm64'}}
     if($nativeArchitecture -cne $ExpectedArchitecture){throw 'Native architecture differs from approved plan.'}
     $sourceBytes=Read-Captured (Join-Path $PSScriptRoot 'onboarding-source.json') 16384
     if((Digest $sourceBytes) -cne $SourceManifestSha256){throw 'Source manifest mismatch.'}
@@ -430,7 +434,11 @@ try {
     $names=@('Install-FalconPro.ps1','Install-KProAlert.ps1','Invoke-FalconProLifecycle.ps1','Uninstall-KProAlert.ps1',
              'plugins/kpro-alerts/scripts/EndpointFacts.ps1','plugins/kpro-alerts/scripts/Invoke-PolicySnapshot.ps1','tools/KProReleaseTrust.psm1')
     $sourceSchema='FalconProOnboardingSource/v2'
-    if($candidateValidation){$names+='Invoke-FalconProCandidateValidation.ps1';$sourceSchema='FalconProCandidateSource/v1'}
+    if($sourceManifest.schema -ceq 'FalconProOnboardingSource/v3'){$names+='falconpro.ps1';$sourceSchema='FalconProOnboardingSource/v3'}
+    if($candidateValidation){
+        $names+='Invoke-FalconProCandidateValidation.ps1';$sourceSchema='FalconProCandidateSource/v1'
+        if($sourceManifest.schema -ceq 'FalconProCandidateSource/v2'){$names+='falconpro.ps1';$sourceSchema='FalconProCandidateSource/v2'}
+    }
     if($sourceManifest.schema -cne $sourceSchema -or @($sourceManifest.files).Count -ne $names.Count){throw 'Lifecycle source manifest required.'}
     $sources=@{}
     foreach($entry in $sourceManifest.files) {
@@ -439,8 +447,10 @@ try {
         if((Digest $data) -cne $entry.sha256){throw 'Source hash mismatch.'}
         $sources[$entry.name]=$data
     }
-    if((Digest $sources['tools/KProReleaseTrust.psm1']) -cne '979c2d8cfd7e19317ae8e5752bad59f6431ac92d69777b5661b27ed7e1dd2639'){throw 'Native trust module mismatch.'}
+    if((Digest $sources['tools/KProReleaseTrust.psm1']) -cne '9403c82406972819dba630231250699717531c5761c8a781bc9763fb8bdd21f0'){throw 'Native trust module mismatch.'}
     Import-Module (Join-Path $PSScriptRoot 'tools/KProReleaseTrust.psm1') -Force
+    $nativePlatform=Get-KProPlatformForWindows ([Version]$os.Version) ([int]$os.BuildNumber) $nativeArchitecture ([int]$os.ProductType)
+    if($ExpectedPlatform -and $ExpectedPlatform -cne $nativePlatform){throw 'Native OS differs from approved plan.'}
     Assert-KProProgramFilesRoot $nativeProgramFiles
     if($candidateValidation) {
         $candidatePermit=Get-KProCandidatePermit $CandidatePermitPath $CandidatePermitSha256 $ExpectedDeviceId $TransactionId $ExpectedArchitecture $SourceManifestSha256 $Mode $PSScriptRoot $held
@@ -450,7 +460,7 @@ try {
         $descriptorBytes=Read-Captured (Join-Path (Split-Path $PSScriptRoot -Parent) 'FalconPro-release.ps1') 65536
         $descriptor=Get-KProSignedReleaseDescriptor -Bytes $descriptorBytes
         if($descriptor.sourceManifestSha256 -cne $SourceManifestSha256 -or $descriptor.packageManifestSha256 -cne $ManifestSha256 -or
-            $descriptor.platform -cne (Get-KProPackageLayout $ExpectedArchitecture).Platform){throw 'Native descriptor binding mismatch.'}
+            $descriptor.platform -cne $nativePlatform){throw 'Native descriptor binding mismatch.'}
     }
     $new=Read-Package $PackageRoot $ManifestSha256
     if($candidateValidation -and $new.releaseStatus -cne 'candidate'){throw 'Validation target must remain candidate.'}
@@ -475,6 +485,9 @@ try {
            $state.deviceId -cne $ExpectedDeviceId -or $state.manifestSha256 -cne $ManifestSha256 -or
            $state.sourceManifestSha256 -cne $SourceManifestSha256 -or $state.deliveryUserSid -cne $DeliveryUserSid -or
            $state.architecture -cne $ExpectedArchitecture){throw 'Transaction mismatch.'}
+        if($state.PSObject.Properties['platform']){
+            if($state.platform -cne $nativePlatform){throw 'Transaction platform mismatch.'}
+        }elseif($nativePlatform -cnotin @('windows11-x64','windows11-arm64')){throw 'Old transaction cannot authorize this platform.'}
         if($candidateValidation -and ($state.validationOnly -ne $true -or $state.candidatePermitSha256 -cne $CandidatePermitSha256 -or
             $state.operation -cne $candidatePermit.operation)){throw 'Candidate transaction mismatch.'}
         if(-not $candidateValidation -and $state.PSObject.Properties['validationOnly'] -and $state.validationOnly){throw 'Candidate cannot resume as production.'}
@@ -578,7 +591,7 @@ try {
     }else{[IO.File]::WriteAllBytes((Join-Path $transactionRoot 'FalconPro-release.ps1'),$descriptorBytes)}
     $state=[ordered]@{schema='FalconProLifecycleResult/v1';transactionId=$TransactionId;deviceId=$ExpectedDeviceId;
         sourceManifestSha256=$SourceManifestSha256;manifestSha256=$ManifestSha256;deliveryUserSid=$DeliveryUserSid;
-        operation=$Mode;version=$new.version;architecture=$ExpectedArchitecture;installedVersion=$new.version;phase='prepared';updatedUtc='';oldManifestSha256='';policyDigest='';
+        operation=$Mode;version=$new.version;architecture=$ExpectedArchitecture;platform=$nativePlatform;installedVersion=$new.version;phase='prepared';updatedUtc='';oldManifestSha256='';policyDigest='';
         bootIdentity=$os.LastBootUpTime.ToUniversalTime().ToString('o');evidenceDirectory='';recoveryEvidenceDirectory='';partialEvidenceDirectory='';errorClass=''}
     if($candidateValidation){$state.schema='FalconProCandidateLifecycleResult/v1';$state.validationOnly=$true;$state.productionEligible=$false;$state.candidatePermitSha256=$CandidatePermitSha256}
     Write-State 'prepared'

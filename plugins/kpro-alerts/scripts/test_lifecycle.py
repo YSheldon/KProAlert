@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 from lifecycle import plan, apply, validate_sources, SOURCES
 from install_metrics import make_event, summarize
 from test_release_download import descriptor
+from release_platforms import layout, architecture_for, required_files
 
 
 class LifecycleTests(unittest.TestCase):
@@ -22,9 +23,8 @@ class LifecycleTests(unittest.TestCase):
         root=Path(destination)
         (root/'package').mkdir(parents=True)
         (root/'onboarding').mkdir()
-        architecture='arm64' if platform=='windows11-arm64' else 'x64'
-        names=(('KProSvcArm.exe','KProProtectArm.dll','KProFilterArm.sys') if architecture=='arm64'
-               else ('KProSvc.exe','KProProtect.dll','KProFilter.sys'))+('DrvCfg2.dat','default-policy.hex')
+        architecture=architecture_for(platform)
+        names=required_files(architecture,platform)
         files=[]
         for name in names:
             data=('fixture-'+name).encode()
@@ -41,7 +41,7 @@ class LifecycleTests(unittest.TestCase):
             path.parent.mkdir(parents=True,exist_ok=True)
             path.write_bytes(b'test-only source')
             entries.append(dict(name=name,sha256=hashlib.sha256(path.read_bytes()).hexdigest()))
-        source=json.dumps(dict(schema='FalconProOnboardingSource/v2',files=entries)).encode()
+        source=json.dumps(dict(schema='FalconProOnboardingSource/v3',files=entries)).encode()
         (root/'onboarding/onboarding-source.json').write_bytes(source)
         (root/'FalconPro-release.ps1').write_bytes(b'test-only descriptor')
         self.descriptor=descriptor()
@@ -50,14 +50,15 @@ class LifecycleTests(unittest.TestCase):
                                sourceManifestSha256=hashlib.sha256(source).hexdigest())
         return self.descriptor
 
-    def plan(self, operation='install', architecture='x64'):
+    def plan(self, operation='install', architecture='x64',platform=None):
         state='not_installed' if operation=='install' else 'running_policy_unverified'
-        return plan(operation,self.release,self.device,endpoint_probe=lambda _:dict(state=state,architecture=architecture),
+        platform=platform or layout(architecture)['platform']
+        return plan(operation,self.release,self.device,endpoint_probe=lambda _:dict(state=state,architecture=architecture,platform=platform),
                     download=self.download,sid_reader=lambda:'S-1-5-21-1-2-3-1001')
 
     def invoke(self, value, **kwargs):
         options=dict(approval=True,platform='nt',verifier=lambda _:self.descriptor,
-                     endpoint_probe=lambda _:dict(state='not_installed',architecture=value['architecture']),executor=Mock(return_value=dict(state='complete')))
+                     endpoint_probe=lambda _:dict(state='not_installed',architecture=value['architecture'],platform=value['platform']),executor=Mock(return_value=dict(state='complete')))
         options.update(kwargs)
         return apply(value,**options)
 
@@ -114,7 +115,7 @@ class LifecycleTests(unittest.TestCase):
     def test_resume_only_counts_verified_completion(self):
         value=self.plan('upgrade')
         metrics=Mock()
-        self.invoke(value,mode='resume',endpoint_probe=lambda _:dict(state='running_policy_unverified',architecture='x64'),metrics=metrics)
+        self.invoke(value,mode='resume',endpoint_probe=lambda _:dict(state='running_policy_unverified',architecture='x64',platform='windows11-x64'),metrics=metrics)
         self.assertEqual([call.kwargs['kind'] for call in metrics.record.call_args_list],['upgrade_success'])
 
     def test_native_timeout_does_not_invent_failure_or_replay(self):
@@ -133,7 +134,7 @@ class LifecycleTests(unittest.TestCase):
         for state in ('residual_install','partial_install','installed_not_running'):
             native=Mock(return_value=dict(state='rolled_back'))
             result=self.invoke(value,mode='rollback',executor=native,
-                               endpoint_probe=lambda _,state=state:dict(state=state,architecture='x64'))
+                               endpoint_probe=lambda _,state=state:dict(state=state,architecture='x64',platform='windows11-x64'))
             self.assertEqual(result['state'],'rolled_back')
             native.assert_called_once()
 
@@ -163,6 +164,17 @@ class LifecycleTests(unittest.TestCase):
         native.reset_mock()
         with self.assertRaises(ValueError):
             self.invoke(value,executor=native,endpoint_probe=lambda _:dict(state='not_installed',architecture='x64'))
+        native.assert_not_called()
+
+    def test_win7_plan_cannot_be_applied_after_os_change(self):
+        value=self.plan(architecture='x86',platform='windows7-x86')
+        self.assertEqual(value['schema'],'FalconProLifecyclePlan/v3')
+        native=Mock(return_value=dict(state='awaiting_reboot'))
+        self.assertEqual(self.invoke(value,executor=native)['state'],'awaiting_reboot')
+        native.reset_mock()
+        with self.assertRaises(ValueError):
+            self.invoke(value,executor=native,endpoint_probe=lambda _:dict(
+                state='not_installed',architecture='x86',platform='windows10-x86'))
         native.assert_not_called()
 
 

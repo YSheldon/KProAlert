@@ -1,8 +1,14 @@
 # Start here: install with your AI assistant
 
-Use [LIFECYCLE.md](LIFECYCLE.md) and the common `falconpro.py` entry for installation,
-upgrade, four-client setup and optional statistics. Existing release gates below
-still apply; the new executor needs its signed onboarding v2 distribution.
+For the Windows 7 SP1-compatible protection entry, use `falconpro.ps1` and
+[WINDOWS-COMPATIBILITY.md](WINDOWS-COMPATIBILITY.md). It also selects modern
+x86/x64 and ARM64 packages from the same repository address. Each platform needs
+its own admitted release and native acceptance.
+
+Use the signed `falconpro.ps1` entry for endpoint installation and upgrade;
+[WINDOWS-COMPATIBILITY.md](WINDOWS-COMPATIBILITY.md) describes its Python-free flow.
+`falconpro.py` remains available on modern hosts for AI connector setup and
+optional statistics. The new endpoint entry requires signed onboarding v3.
 
 For automatic local detection and installation after first confirmation, follow
 [LOCAL-ENDPOINT.md](LOCAL-ENDPOINT.md). Never treat the bot's cloud host as the PC.
@@ -42,11 +48,12 @@ missing verified release or an existing conflicting installation.
 3. Explain deterministic protection, the scope of signed policy, privacy/export
    choices, AI fees/availability and the effect on business-critical workflows.
    Confirm first machine installation and each high-risk additional action.
-4. Use `falconpro.py install --device-id <confirmed-device-id>` to download the
-   matching signed release and produce a plan. After approval, use
-   `falconpro.py install --plan <plan-path> --apply --approve`. Do not reconstruct
+4. Use the signed `falconpro.ps1 -Mode install -ExpectedDeviceId <confirmed-device-id>`
+   entry to download the matching signed release and produce a plan. After approval,
+   use `-Mode install -PlanPath <plan-path> -ExpectedDeviceId <same-id> -Apply -Approve`.
+   Do not reconstruct
    low-level installer arguments or ask an ordinary user to supply hashes. Use
-   `--resume` after a normal reboot and `upgrade` for later signed releases.
+   `-Mode resume` after a normal reboot and `-Mode upgrade` for later signed releases.
    Public release admission is still required; do not bypass it for convenience.
 5. Configure the background bridge and destination independently from MCP. Raw
    events stay in access-controlled local storage; only approved fields are exported.

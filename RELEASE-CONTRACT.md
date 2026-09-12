@@ -4,10 +4,11 @@ No binary release is published until all gates pass. The public installer must
 consume an immutable versioned release and a trusted expected manifest SHA-256,
 not a mutable latest URL or file-supplied checksum alone.
 
-The already published validation preview is Windows 11 x64 only. The current
-installer source additionally supports Windows 11 ARM64 workstations, subject to
-its own signed release and native acceptance. Windows Server and x86 are not
-admitted by this public entry. Each native package has exactly five payload files:
+The already published validation preview is Windows 11 x64 only. The installer
+source selects Windows 7 SP1, Windows 8.1, Windows 10 and Windows 11 packages by
+OS and native architecture. Each requires its own signed release and native
+acceptance; see [WINDOWS-COMPATIBILITY.md](WINDOWS-COMPATIBILITY.md). Windows Server
+is not admitted. Each native package has exactly five payload files:
 
 | Architecture | Platform | Native payloads | Shared signed data |
 | --- | --- | --- | --- |

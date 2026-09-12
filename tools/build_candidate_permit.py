@@ -10,6 +10,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'plugins/kpro-alerts/scripts'))
 from build_onboarding_manifest import NAMES
+from release_platforms import layout, required_files
 
 
 def digest(data):
@@ -19,19 +20,20 @@ def digest(data):
 def build(source_root, package_roots, device, transaction, architecture, operation):
     if not re.fullmatch('[a-f0-9]{64}', device) or not re.fullmatch('[a-f0-9]{32}', transaction):
         raise ValueError('Explicit device and transaction digests required')
-    if architecture not in ('x64', 'arm64') or operation not in ('install', 'upgrade'):
+    if architecture not in ('x86', 'x64', 'arm64') or operation not in ('install', 'upgrade'):
         raise ValueError('Unsupported candidate operation')
     if len(package_roots) != (2 if operation == 'upgrade' else 1):
         raise ValueError('Upgrade requires target and exact previous package')
     names = (*NAMES, 'Invoke-FalconProCandidateValidation.ps1')
-    source = {'schema': 'FalconProCandidateSource/v1', 'files': [
+    source = {'schema': 'FalconProCandidateSource/v2', 'files': [
         {'name': name, 'sha256': digest((source_root / name).read_bytes())} for name in names]}
     source_bytes = (json.dumps(source, indent=2) + '\n').encode()
     packages = []
     for root in package_roots:
         raw = (root / 'release-manifest.json').read_bytes()
         manifest = json.loads(raw.decode('utf-8-sig'))
-        if manifest['architecture'] != architecture or manifest['platform'] != 'windows11-' + architecture:
+        target=layout(architecture, manifest['platform'])
+        if manifest['architecture'] != architecture:
             raise ValueError('Candidate architecture mismatch')
         status = manifest['releaseStatus']
         if manifest['schema'] != 'KProAlertRelease/v1' or status not in ('candidate', 'verified'):
@@ -42,8 +44,7 @@ def build(source_root, package_roots, device, transaction, architecture, operati
             expected = not (status == 'candidate' and gate == 'endToEnd')
             if manifest['gates'].get(gate) is not expected:
                 raise ValueError('Signature/evidence gate incomplete')
-        suffix = 'Arm' if architecture == 'arm64' else ''
-        required = {f'KProSvc{suffix}.exe', f'KProProtect{suffix}.dll', f'KProFilter{suffix}.sys', 'DrvCfg2.dat', 'default-policy.hex'}
+        required = required_files(architecture,target['platform'])
         if len(manifest['files']) != 5 or {f['name'] for f in manifest['files']} != required:
             raise ValueError('Incomplete candidate files')
         for file in manifest['files']:
@@ -70,7 +71,7 @@ if __name__ == '__main__':
     parser.add_argument('--package-root', type=Path, action='append', required=True)
     parser.add_argument('--device', required=True)
     parser.add_argument('--transaction', required=True)
-    parser.add_argument('--architecture', choices=('x64', 'arm64'), required=True)
+    parser.add_argument('--architecture', choices=('x86', 'x64', 'arm64'), required=True)
     parser.add_argument('--operation', choices=('install', 'upgrade'), required=True)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()

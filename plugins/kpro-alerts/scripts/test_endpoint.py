@@ -22,8 +22,15 @@ class EndpointTests(unittest.TestCase):
         result = classify(facts(architecture='arm64'), DEVICE)
         self.assertEqual(result['architecture'], 'arm64')
         self.assertTrue(result['installEligible'])
-        for architecture in (None, 'x86', 'unknown'):
+        for architecture in (None, 'unknown'):
             self.assertFalse(classify(facts(architecture=architecture), DEVICE)['installEligible'])
+
+    def test_x86_platform_is_propagated(self):
+        result = classify(facts(schema='FalconProEndpointFacts/v2',architecture='x86', platform='windows7-x86',
+                                osVersion='6.1.7601',buildNumber=7601,productType=1), DEVICE)
+        self.assertEqual(result['architecture'], 'x86')
+        self.assertEqual(result['platform'], 'windows7-x86')
+        self.assertTrue(result['installEligible'])
 
     def test_unbound_never_means_absent(self):
         result = classify(facts(), '')
@@ -118,7 +125,7 @@ class EndpointTests(unittest.TestCase):
         import hashlib
         root=Path(__file__).resolve().parents[3]
         result=build(root)
-        self.assertEqual(result['schema'],'FalconProOnboardingSource/v2')
+        self.assertEqual(result['schema'],'FalconProOnboardingSource/v3')
         self.assertEqual({entry['name'] for entry in result['files']},set(NAMES))
         for entry in result['files']:
             self.assertEqual(entry['sha256'],hashlib.sha256((root/entry['name']).read_bytes()).hexdigest())

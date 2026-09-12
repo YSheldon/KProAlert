@@ -16,11 +16,11 @@ from release_download import acquire, validate_descriptor, version_tuple
 from release_manifest import validate
 from spool import checked
 from windows_tools import native_tool
-from release_platforms import layout
+from release_platforms import layout, layout_for_platform, os_family_for
 from elevation import run_elevated
 
 
-SOURCES = ('Install-FalconPro.ps1', 'Install-KProAlert.ps1',
+SOURCES = ('falconpro.ps1','Install-FalconPro.ps1', 'Install-KProAlert.ps1',
            'Invoke-FalconProLifecycle.ps1', 'Uninstall-KProAlert.ps1',
            'plugins/kpro-alerts/scripts/EndpointFacts.ps1',
            'plugins/kpro-alerts/scripts/Invoke-PolicySnapshot.ps1',
@@ -54,17 +54,18 @@ def validate_sources(root, expected):
     root = Path(root)
     path = root / 'onboarding-source.json'
     value = read_json(path, 16384)
-    if sha(path) != expected or value.get('schema') != 'FalconProOnboardingSource/v2':
+    if sha(path) != expected or value.get('schema') not in ('FalconProOnboardingSource/v2','FalconProOnboardingSource/v3'):
         raise ValueError('Signed lifecycle source manifest required')
+    names=SOURCES if value['schema']=='FalconProOnboardingSource/v3' else tuple(n for n in SOURCES if n!='falconpro.ps1')
     entries = value.get('files')
-    if not isinstance(entries, list) or len(entries) != len(SOURCES):
+    if not isinstance(entries, list) or len(entries) != len(names):
         raise ValueError('Unexpected onboarding file set')
     seen = set()
     for entry in entries:
         if not isinstance(entry, dict) or set(entry) != {'name', 'sha256'}:
             raise ValueError('Invalid source record')
         name = entry['name']
-        if name not in SOURCES or name in seen:
+        if name not in names or name in seen:
             raise ValueError('Unexpected or duplicate source name')
         seen.add(name)
         source = root / name
@@ -82,20 +83,22 @@ def plan(operation, destination, device_id, *, endpoint_probe=probe, download=ac
         return dict(state=state.get('state', 'unknown'), installPerformed=False,
                     nextStep='Bind the actual Windows endpoint or diagnose existing protection')
     architecture = state.get('architecture')
-    target = layout(architecture)
+    target = layout_for_platform(state.get('platform'))
     descriptor = download(destination, verify_descriptor, platform=target['platform'])
     root = Path(destination).resolve(strict=True)
     manifest = read_json(root / 'package/release-manifest.json')
     if sha(root / 'package/release-manifest.json') != descriptor['packageManifestSha256']:
         raise ValueError('Package manifest differs from signed descriptor')
-    validate(manifest, root / 'package', architecture)
+    if architecture != target['architecture']:
+        raise ValueError('Endpoint architecture/platform mismatch')
+    validate(manifest, root / 'package', architecture,target['platform'])
     if descriptor['platform'] != target['platform']:
         raise ValueError('Release/endpoint architecture mismatch')
     if version_tuple(manifest['version']) != version_tuple(descriptor['version']):
         raise ValueError('Release version mismatch')
     validate_sources(root / 'onboarding', descriptor['sourceManifestSha256'])
-    return dict(schema='FalconProLifecyclePlan/v2', operation=operation, deviceId=device_id,
-                architecture=architecture,
+    return dict(schema='FalconProLifecyclePlan/v3', operation=operation, deviceId=device_id,
+                architecture=architecture, platform=target['platform'],
                 transactionId=secrets.token_hex(16), releaseRoot=str(root),
                 version=manifest['version'], manifestSha256=descriptor['packageManifestSha256'],
                 sourceManifestSha256=descriptor['sourceManifestSha256'], deliveryUserSid=sid_reader(),
@@ -109,9 +112,15 @@ def checked_plan(value):
         raise ValueError('Invalid lifecycle plan')
     if value.get('schema')=='FalconProLifecyclePlan/v1' and set(value)==keys:
         value={**value,'schema':'FalconProLifecyclePlan/v2','architecture':'x64'}
-    if set(value)!=keys|{'architecture'} or value['schema']!='FalconProLifecyclePlan/v2':
+    if value.get('schema')=='FalconProLifecyclePlan/v2' and set(value)==keys|{'architecture'}:
+        if value['architecture'] not in ('x64','arm64'):
+            raise ValueError('Legacy plans only admit Windows 11 architectures')
+        value={**value,'schema':'FalconProLifecyclePlan/v3','platform':layout(value['architecture'])['platform']}
+    if set(value)!=keys|{'architecture','platform'} or value['schema']!='FalconProLifecyclePlan/v3':
         raise ValueError('Invalid lifecycle plan')
-    layout(value['architecture'])
+    target=layout_for_platform(value['platform'])
+    if value['architecture']!=target['architecture']:
+        raise ValueError('Invalid lifecycle platform binding')
     if value['operation'] not in ('install','upgrade') or value['requiresApproval'] is not True or value['installPerformed'] is not False:
         raise ValueError('Invalid lifecycle intent')
     for name,length in (('deviceId',64),('transactionId',32),('manifestSha256',64),('sourceManifestSha256',64)):
@@ -169,6 +178,8 @@ def native_execute(value, mode):
           '-SourceManifestSha256',value['sourceManifestSha256'],'-ManifestSha256',value['manifestSha256'],
           '-PackageRoot',str(root/'package'),'-DeliveryUserSid',value['deliveryUserSid'],'-Approve','-Apply']
     args+=['-ExpectedArchitecture',value['architecture']]
+    if 'platform' in value:
+        args+=['-ExpectedPlatform',value['platform']]
     with lock_entry(entry):
         verify_entry(entry)
         result=run_elevated(executable,args)
@@ -190,6 +201,8 @@ def native_execute(value, mode):
     for name in ('deviceId','transactionId','manifestSha256','sourceManifestSha256','deliveryUserSid','version','architecture','operation'):
         if reply.get(name)!=value[name]:
             raise ValueError('Native lifecycle result binding failed')
+    if reply.get('platform',layout(value['architecture'])['platform']) != value.get('platform',layout(value['architecture'])['platform']):
+        raise ValueError('Native lifecycle platform binding failed')
     if reply.get('schema')!='FalconProLifecycleResult/v1' or reply.get('phase') not in (
             'awaiting_reboot','complete','recovery_awaiting_reboot','rolled_back','cancelled_no_change','installation_aborted'):
         raise ValueError('Native lifecycle outcome is incomplete')
@@ -223,13 +236,15 @@ def apply(value, *, approval=False, mode=None, platform=None, verifier=verify_de
         raise ValueError('Endpoint changed; do not reinstall or replay a partial operation')
     if state.get('architecture')!=value['architecture']:
         raise ValueError('Endpoint architecture differs from the approved plan')
+    if state.get('platform')!=value['platform']:
+        raise ValueError('Endpoint OS platform differs from the approved plan')
     root=Path(value['releaseRoot'])
     checked(root)
     signed=(root/'FalconPro-release.ps1').read_bytes()
     if len(signed)>65536:
         raise ValueError('Descriptor exceeds size budget')
     descriptor=validate_descriptor(verifier(signed))
-    if descriptor['platform']!=layout(value['architecture'])['platform']:
+    if descriptor['platform']!=value['platform']:
         raise ValueError('Signed release architecture differs from the approved plan')
     for key in ('version','sourceManifestSha256'):
         if descriptor[key]!=value[key]:raise ValueError('Release differs from approved plan')
@@ -238,10 +253,10 @@ def apply(value, *, approval=False, mode=None, platform=None, verifier=verify_de
     validate_sources(root/'onboarding',value['sourceManifestSha256'])
     if sha(root/'package/release-manifest.json')!=value['manifestSha256']:
         raise ValueError('Package manifest changed')
-    validate(read_json(root/'package/release-manifest.json'),root/'package',value['architecture'])
+    validate(read_json(root/'package/release-manifest.json'),root/'package',value['architecture'],value['platform'])
     def record(kind):
         if metrics is None:return
-        try:metrics.record(kind=kind,version=value['version'],architecture=value['architecture'],os_family='windows11')
+        try:metrics.record(kind=kind,version=value['version'],architecture=value['architecture'],os_family=os_family_for(value['platform']))
         except (OSError,ValueError,RuntimeError,sqlite3.Error):pass
     if selected in ('install','upgrade'):record(selected+'_started')
     try:

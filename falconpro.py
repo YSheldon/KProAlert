@@ -91,7 +91,7 @@ def main():
         if args.resume or args.rollback:raise ValueError('Resume/recovery requires the original plan')
         destination=Path(args.destination) if args.destination else Path(tempfile.mkdtemp(prefix='FalconPro-'))/'release'
         value=plan(args.command,destination,args.device_id)
-        if value.get('schema')!='FalconProLifecyclePlan/v2':return value
+        if value.get('schema')!='FalconProLifecyclePlan/v3':return value
         plan_path=destination/'lifecycle-plan.json'
         with plan_path.open('x',encoding='utf-8') as stream:json.dump(value,stream,indent=2)
         if not args.apply:return {**value,'planPath':str(plan_path)}

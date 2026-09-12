@@ -87,22 +87,78 @@ function Assert-KProReleaseAttestation {
 }
 
 function Get-KProPackageLayout {
-    param([Parameter(Mandatory)][ValidateSet('x64','arm64')][string]$Architecture)
-    if ($Architecture -eq 'arm64') {
-        return @{Platform='windows11-arm64';Service='KProSvcArm.exe';Dll='KProProtectArm.dll';Driver='KProFilterArm.sys';Machine=0xaa64}
+    param([Parameter(Mandatory)][ValidateSet('x86','x64','arm64')][string]$Architecture,
+          [string]$Platform)
+    if ($Platform) {
+        $table=@{
+            'windows7-x86'=@{Platform='windows7-x86';Legacy=$true;Service='KProSvc32.exe';Dll='KProProtect32.dll';Driver='KProFilter32.sys';Machine=0x14c}
+            'windows7-x64'=@{Platform='windows7-x64';Legacy=$true;Service='KProSvc.exe';Dll='KProProtect.dll';Driver='KProFilter.sys';Machine=0x8664}
+            'windows81-x86'=@{Platform='windows81-x86';Legacy=$false;Service='KProSvc32.exe';Dll='KProProtect32.dll';Driver='KProFilter32.sys';Machine=0x14c}
+            'windows81-x64'=@{Platform='windows81-x64';Legacy=$false;Service='KProSvc.exe';Dll='KProProtect.dll';Driver='KProFilter.sys';Machine=0x8664}
+            'windows10-x86'=@{Platform='windows10-x86';Legacy=$false;Service='KProSvc32.exe';Dll='KProProtect32.dll';Driver='KProFilter32.sys';Machine=0x14c}
+            'windows10-x64'=@{Platform='windows10-x64';Legacy=$false;Service='KProSvc.exe';Dll='KProProtect.dll';Driver='KProFilter.sys';Machine=0x8664}
+            'windows11-x64'=@{Platform='windows11-x64';Legacy=$false;Service='KProSvc.exe';Dll='KProProtect.dll';Driver='KProFilter.sys';Machine=0x8664}
+            'windows11-arm64'=@{Platform='windows11-arm64';Legacy=$false;Service='KProSvcArm.exe';Dll='KProProtectArm.dll';Driver='KProFilterArm.sys';Machine=0xaa64}
+        }
+        $machine=@{x86=0x14c;x64=0x8664;arm64=0xaa64}
+        if (-not $table.ContainsKey($Platform) -or $table[$Platform].Machine -ne $machine[$Architecture]) {
+            throw 'Release platform/architecture mismatch.'
+        }
+        return $table[$Platform]
     }
-    return @{Platform='windows11-x64';Service='KProSvc.exe';Dll='KProProtect.dll';Driver='KProFilter.sys';Machine=0x8664}
+    if ($Architecture -eq 'arm64') { return @{Platform='windows11-arm64';Legacy=$false;Service='KProSvcArm.exe';Dll='KProProtectArm.dll';Driver='KProFilterArm.sys';Machine=0xaa64} }
+    if ($Architecture -eq 'x86') { return @{Platform='windows10-x86';Legacy=$false;Service='KProSvc32.exe';Dll='KProProtect32.dll';Driver='KProFilter32.sys';Machine=0x14c} }
+    return @{Platform='windows11-x64';Legacy=$false;Service='KProSvc.exe';Dll='KProProtect.dll';Driver='KProFilter.sys';Machine=0x8664}
+}
+
+function Get-KProPlatformForWindows {
+    param([Parameter(Mandatory)][Version]$OsVersion,[Parameter(Mandatory)][int]$BuildNumber,
+          [Parameter(Mandatory)][ValidateSet('x86','x64','arm64')][string]$Architecture,
+          [int]$ProductType=1)
+    if($ProductType -ne 1){throw 'Server operating systems are not admitted.'}
+    if($OsVersion.Build -ge 0 -and $OsVersion.Build -ne $BuildNumber){throw 'Windows build facts differ.'}
+    if($OsVersion.Major -eq 6 -and $OsVersion.Minor -eq 1){
+        if($BuildNumber -ne 7601){throw 'Windows 7 SP1 is required.'}
+        if($Architecture -eq 'arm64'){throw 'ARM64 Windows 7 is not supported.'}
+        return 'windows7-'+$Architecture
+    }
+    if($OsVersion.Major -eq 6 -and $OsVersion.Minor -eq 2 -and $BuildNumber -eq 9200){
+        if($Architecture -eq 'arm64'){throw 'ARM64 Windows 8 is not supported.'}
+        return 'windows7-'+$Architecture
+    }
+    if($OsVersion.Major -eq 6 -and $OsVersion.Minor -eq 3 -and $BuildNumber -eq 9600){
+        if($Architecture -eq 'arm64'){throw 'ARM64 Windows 8.1 is not admitted.'}
+        return 'windows81-'+$Architecture
+    }
+    if($OsVersion.Major -eq 10 -and $OsVersion.Minor -eq 0 -and $BuildNumber -ge 10240 -and $BuildNumber -le 65535){
+        if($Architecture -eq 'arm64'){
+            if($BuildNumber -lt 22000){throw 'ARM64 Windows 11 is required.'}
+            return 'windows11-arm64'
+        }
+        if($BuildNumber -ge 22000){
+            if($Architecture -eq 'x86'){throw 'Windows 11 x86 is not supported.'}
+            return 'windows11-x64'
+        }
+        return 'windows10-'+$Architecture
+    }
+    throw 'Unsupported Windows version.'
 }
 
 function Assert-KProPeArchitecture {
-    param([Parameter(Mandatory)][byte[]]$Bytes,[Parameter(Mandatory)][ValidateSet('x64','arm64')][string]$Architecture)
+    param([Parameter(Mandatory)][byte[]]$Bytes,[Parameter(Mandatory)][ValidateSet('x86','x64','arm64')][string]$Architecture,
+          [Nullable[bool]]$RequireForceIntegrity=$null)
     if ($Bytes.Length -lt 64 -or $Bytes[0] -ne 0x4d -or $Bytes[1] -ne 0x5a) { throw 'Invalid PE header.' }
     $offset=[BitConverter]::ToInt32($Bytes,60)
     if ($offset -lt 64 -or $offset -gt $Bytes.Length-26 -or
         [BitConverter]::ToUInt32($Bytes,$offset) -ne 0x4550 -or
-        [BitConverter]::ToUInt16($Bytes,$offset+24) -ne 0x20b) { throw 'Invalid PE layout.' }
+        [BitConverter]::ToUInt16($Bytes,$offset+24) -ne $(if($Architecture -ceq 'x86'){0x10b}else{0x20b})) { throw 'Invalid PE layout.' }
     $layout=Get-KProPackageLayout $Architecture
     if ([BitConverter]::ToUInt16($Bytes,$offset+4) -ne $layout.Machine) { throw 'PE architecture does not match native endpoint.' }
+    if($null -ne $RequireForceIntegrity){
+        if($offset -gt $Bytes.Length-96 -or [BitConverter]::ToUInt16($Bytes,$offset+20) -lt 72){throw 'Truncated PE optional header.'}
+        $force=([BitConverter]::ToUInt16($Bytes,$offset+94) -band 0x80) -ne 0
+        if($force -ne $RequireForceIntegrity){throw 'User-mode Force Integrity does not match the OS package.'}
+    }
 }
 
 function Get-KProSignedReleaseDescriptor {
@@ -114,7 +170,7 @@ function Get-KProSignedReleaseDescriptor {
     $utf8=New-Object Text.UTF8Encoding($false,$true)
     $descriptor=$utf8.GetString([Convert]::FromBase64String($markers[0].Groups[1].Value)) | ConvertFrom-Json
     if ($descriptor.schema -cne 'FalconProReleaseDescriptor/v1' -or $descriptor.releaseStatus -cne 'verified' -or
-        $descriptor.platform -cnotin @('windows11-x64','windows11-arm64') -or
+        $descriptor.platform -cnotin @('windows7-x86','windows7-x64','windows81-x86','windows81-x64','windows10-x86','windows10-x64','windows11-x64','windows11-arm64') -or
         $descriptor.sourceManifestSha256 -cnotmatch '^[a-f0-9]{64}$' -or
         $descriptor.packageManifestSha256 -cnotmatch '^[a-f0-9]{64}$') { throw 'Invalid admitted descriptor.' }
     return $descriptor
@@ -159,7 +215,7 @@ function Assert-KProCandidatePermitFacts {
        @($Permit.PSObject.Properties.Name | Where-Object {$_ -cnotin $keys}).Count -ne 0 -or
        $Permit.schema -cne 'FalconProCandidatePermit/v1' -or
        $Device -cnotmatch '^[a-f0-9]{64}$' -or $Transaction -cnotmatch '^[a-f0-9]{32}$' -or
-       $SourceHash -cnotmatch '^[a-f0-9]{64}$' -or $Architecture -cnotin @('x64','arm64') -or
+       $SourceHash -cnotmatch '^[a-f0-9]{64}$' -or $Architecture -cnotin @('x86','x64','arm64') -or
        $Permit.deviceId -cne $Device -or $Permit.transactionId -cne $Transaction -or
        $Permit.architecture -cne $Architecture -or $Permit.sourceManifestSha256 -cne $SourceHash -or
        $Permit.operation -cnotin @('install','upgrade') -or $Mode -cnotin @('install','upgrade','resume','rollback','snapshot') -or
@@ -191,7 +247,7 @@ function Assert-KProCandidatePackage {
         $expected= -not ($Manifest.releaseStatus -ceq 'candidate' -and $gate -ceq 'endToEnd')
         if($Manifest.gates.$gate -isnot [bool] -or $Manifest.gates.$gate -ne $expected){throw 'Candidate signature or evidence gate rejected.'}
     }
-    $layout=Get-KProPackageLayout $Permit.architecture
+    $layout=Get-KProPackageLayout $Permit.architecture -Platform $Manifest.platform
     $names=@($layout.Service,$layout.Dll,$layout.Driver,'DrvCfg2.dat','default-policy.hex')
     foreach($list in @(@{files=$bound[0].files},@{files=$Manifest.files})) {
         if(@($list.files).Count -ne $names.Count){throw 'Candidate file count mismatch.'}
@@ -248,7 +304,8 @@ function Get-KProCandidatePermit {
     $names=@('Install-FalconPro.ps1','Install-KProAlert.ps1','Invoke-FalconProLifecycle.ps1','Uninstall-KProAlert.ps1',
              'plugins/kpro-alerts/scripts/EndpointFacts.ps1','plugins/kpro-alerts/scripts/Invoke-PolicySnapshot.ps1',
              'tools/KProReleaseTrust.psm1','Invoke-FalconProCandidateValidation.ps1')
-    if($source.schema -cne 'FalconProCandidateSource/v1' -or @($source.files).Count -ne $names.Count){throw 'Candidate sources incomplete.'}
+    if($source.schema -ceq 'FalconProCandidateSource/v2'){$names+='falconpro.ps1'}
+    if($source.schema -cnotin @('FalconProCandidateSource/v1','FalconProCandidateSource/v2') -or @($source.files).Count -ne $names.Count){throw 'Candidate sources incomplete.'}
     $seen=@{}
     foreach($entry in $source.files) {
         if($entry.name -cnotin $names -or $seen.ContainsKey($entry.name)){throw 'Candidate source entry rejected.'}
@@ -260,4 +317,4 @@ function Get-KProCandidatePermit {
     return $permit
 }
 
-Export-ModuleMember -Function Assert-KProReleaseAttestation,ConvertFrom-KProAttestationText,Get-KProPackageLayout,Assert-KProPeArchitecture,Get-KProSignedReleaseDescriptor,Get-KProNativeProgramFiles,Assert-KProProgramFilesRoot,Assert-KProCandidatePermitFacts,Assert-KProCandidatePackage,Get-KProCandidatePermit
+Export-ModuleMember -Function Assert-KProReleaseAttestation,ConvertFrom-KProAttestationText,Get-KProPackageLayout,Get-KProPlatformForWindows,Assert-KProPeArchitecture,Get-KProSignedReleaseDescriptor,Get-KProNativeProgramFiles,Assert-KProProgramFilesRoot,Assert-KProCandidatePermitFacts,Assert-KProCandidatePackage,Get-KProCandidatePermit

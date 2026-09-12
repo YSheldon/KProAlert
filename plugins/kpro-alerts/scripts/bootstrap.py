@@ -12,7 +12,7 @@ from endpoint import probe
 from release_download import acquire, version_tuple
 from release_manifest import validate
 from windows_tools import native_tool
-from release_platforms import layout
+from release_platforms import layout_for_platform
 
 
 def verify_descriptor(data):
@@ -44,18 +44,21 @@ def prepare(destination,expected_device_id,*,endpoint_probe=probe,download=acqui
         return dict(state=endpoint['state'],installPerformed=False,
                     nextStep='Confirm the actual local device or diagnose existing protection; do not reinstall')
     architecture=endpoint.get('architecture')
-    target=layout(architecture)
+    target=layout_for_platform(endpoint.get('platform'))
     descriptor=download(destination,verify_descriptor,platform=target['platform'])
     root=Path(destination)
     manifest=json.loads((root/'package/release-manifest.json').read_text(encoding='utf-8-sig'))
-    validate(manifest,root/'package',architecture)
+    if architecture!=target['architecture']:
+        raise ValueError('Endpoint architecture/platform mismatch')
+    validate(manifest,root/'package',architecture,target['platform'])
     if descriptor['platform']!=target['platform']:
         raise ValueError('Descriptor/endpoint architecture mismatch')
     if version_tuple(manifest['version'])!=version_tuple(descriptor['version']):
         raise ValueError('Descriptor/package version mismatch')
     sid=sid_reader()
     return dict(schema='FalconProBootstrapPlan/v1',state='ready_for_native_plan',
-        deviceId=endpoint['deviceId'],architecture=architecture,version=descriptor['version'],installPerformed=False,
+        deviceId=endpoint['deviceId'],architecture=architecture,platform=target['platform'],
+        legacy=target['legacy'],version=descriptor['version'],installPerformed=False,
         requiresAdministrator=True,requiresExplicitApproval=True,requiresProtectedStaging=True,
         command=[str(root/'onboarding/Install-FalconPro.ps1'),'-ExpectedDeviceId',endpoint['deviceId'],
                  '-SourceManifestSha256',descriptor['sourceManifestSha256'],
