@@ -99,7 +99,7 @@ class NativeReceiptReaderTests(unittest.TestCase):
                 self.assertNotIn('private',str(caught.exception))
 
     def test_publisher_probe_uses_child_system_module_path(self):
-        with patch.object(native,'native_tool',return_value='powershell.exe'), \
+        with patch.object(native,'native_tool',return_value='powershell.exe'),patch.object(native,'_locked_entry'), \
              patch.object(native.subprocess,'run',return_value=CompletedProcess([],0,b'verified',b'')) as run:
             native._verify_publisher('C:\\x\\FalconProSetup.exe')
         command=run.call_args.args[0][-1]
@@ -119,13 +119,20 @@ class NativeReceiptReaderTests(unittest.TestCase):
         def run(*args,**kwargs):
             events.append('import')
             return CompletedProcess([],0,b'verified',b'')
-        with patch.object(native,'_locked_entry',guard),patch.object(native.subprocess,'run',side_effect=run):
+        with patch.object(native,'_locked_entry',guard),patch.object(native.subprocess,'run',side_effect=run), \
+             patch.object(native,'native_tool',return_value='powershell.exe'):
             native._verify_publisher('C:\\x\\FalconProSetup.exe')
         self.assertEqual(events,['pin','import','unpin'])
         with patch.object(native,'_locked_entry',side_effect=ValueError('module hash mismatch')), \
              patch.object(native.subprocess,'run') as process,self.assertRaises(ValueError):
             native._verify_publisher('C:\\x\\FalconProSetup.exe')
         process.assert_not_called()
+
+    def test_actual_channel_is_rejected_outside_windows(self):
+        with patch.object(native.os,'name','posix'), \
+             self.assertRaisesRegex(ValueError,'Authorized local Windows channel required'):
+            with native._locked_entry('C:\\x\\FalconProSetup.exe','a'*64):
+                self.fail('Non-Windows channel accepted')
 
 
 if __name__=='__main__':

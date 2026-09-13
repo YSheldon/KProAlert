@@ -156,9 +156,11 @@ endpoint installer and does not add an endpoint Python requirement.
 Windows8/8.1 observations use `windows8`, a newly supported metrics OS-family
 value. Update receiving validators/choice fields before enabling this platform;
 never relabel it as Windows7/10. Null historical OS classification is rejected.
-The currently published preview .2 predates `receipt`; it must fail as unsupported,
-not fall back to trusting JSON. A signed compatible entry and runtime acceptance
-are required before this new source path is declared available to users.
+Native preview .2 predates `receipt`; it must fail as unsupported, not fall back
+to trusting JSON. Preview .3 includes the command. Its signed Windows 11 x64
+entry passed an existing completed-history read, repeat, wrong-device and missing-
+transaction checks, without changing the journal or service PID. This does not
+prove other architectures, full installation/PPL upgrade or metrics upload.
 
 ## Verified Native Observation Bridge
 
