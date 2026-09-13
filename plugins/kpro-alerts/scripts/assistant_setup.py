@@ -30,12 +30,13 @@ def discover_client(client):
 
 
 def make_plan(client, database=None, cli=None, base=None, table=None,
-              client_command=None, workbuddy_config=None, collector_health=None, endpoint_device_id=None):
-    if client not in ('codex', 'workbuddy', 'cursor', 'grok', 'generic'):
+              client_command=None, workbuddy_config=None, collector_health=None, endpoint_device_id=None, operations_database=None):
+    if client not in ('codex', 'workbuddy', 'cursor', 'grok', 'zcode', 'generic'):
         raise ValueError('Unsupported assistant')
     onboarding_only = not any((database, cli, base, table))
     server = build_config(database, cli, base, table, collector_health, endpoint_device_id,
-                          onboarding_only=onboarding_only)['mcpServers']['kpro-alerts']
+                          onboarding_only=onboarding_only, operations_database=operations_database,
+                          assistant_client=client)['mcpServers']['kpro-alerts']
     command = []
     if client in ('codex', 'workbuddy'):
         command = client_command or discover_client(client)
@@ -58,6 +59,11 @@ def equivalent(actual, desired):
 
 def register(plan, runner=subprocess.run):
     client, server, prefix = plan['client'], plan['server'], plan['clientCommand']
+    if client == 'zcode':
+        return dict(registration='host_tool_required', hostTool='ZCode MCP settings',
+                    serverName='kpro-alerts', configuration={'mcp': {'servers': {'kpro-alerts': server}}},
+                    configPath=str(Path.home()/'.zcode/cli/config.json'),
+                    preserveExistingServers=True, clientRuntimeVerified=False, protectionInstalled=False)
     if client == 'cursor':
         return dict(registration='host_tool_required', hostTool='Cursor MCP settings',
                     serverName='kpro-alerts', configuration={'mcpServers':{'kpro-alerts':server}},
@@ -127,7 +133,7 @@ def register(plan, runner=subprocess.run):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--client', choices=['codex','workbuddy','cursor','grok','generic'], required=True)
+    parser.add_argument('--client', choices=['codex','workbuddy','cursor','grok','zcode','generic'], required=True)
     parser.add_argument('--database')
     parser.add_argument('--cli')
     parser.add_argument('--base')

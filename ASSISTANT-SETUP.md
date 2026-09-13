@@ -5,7 +5,7 @@ read [NATIVE-INSTALL.md](NATIVE-INSTALL.md) for signed EXE installation, upgrade
 reboot resume, recovery and metrics upload. Registration never counts as driver
 installation or endpoint protection.
 
-Give Codex, Grok Bot, WorkBuddy or Cursor `https://github.com/YSheldon/KProAlert` and ask it to install **FalconPro** following
+Give Codex, Grok Bot, WorkBuddy, Cursor or ZCode `https://github.com/YSheldon/KProAlert` and ask it to install **FalconPro** following
 START-HERE.md. The assistant must distinguish installing this query connector from
 installing Windows endpoint protection. Platform admission follows the native
 guide; a Linux Grok Bot cannot install a Windows driver into its own
@@ -15,7 +15,7 @@ local Windows execution capability.
 ## Query connector setup
 
 On first use, `falconpro.py setup --client codex` (or `cursor`, `grok`,
-`workbuddy`) needs no database or Feishu credentials. It returns an explicitly
+`workbuddy`, `zcode`) needs no database or Feishu credentials. It returns an explicitly
 onboarding-only plan: status tools work, unconfigured event queries return an
 error, and no database, service, driver or background task is created. After
 review, `--apply` registers through the supported client interface; Grok still
@@ -64,8 +64,24 @@ entry to force the global configuration. After registration, verify in Cursor th
 the server is connected, call `integration_status`, and query the selected data
 source. Source/configuration tests do not prove the Cursor runtime connected.
 
-Cursor uses the same read-only analysis tools and signed Windows protection
+Cursor uses the same analysis tools and signed Windows protection
 package as the other clients. No Cursor marketplace listing is claimed.
+
+### ZCode
+
+Use `falconpro.py setup --client zcode` to preview, then `--apply` for the
+native `mcp.servers` configuration merge. See [ZCODE.md](ZCODE.md) for workspace
+precedence and fallback conflicts. No tool permission is automatically approved.
+
+### AI Operations
+
+With an explicitly selected local event database, supply
+`--operations-database <separate-local-journal.db>` to `falconpro.py setup`.
+The generated connector uses `KPRO_OPERATIONS_DATABASE` and `KPRO_ASSISTANT_CLIENT`.
+`assess_event` appends a source-bound AI assertion; `propose_action` only records
+an unapproved request. Neither changes protection or executes remediation.
+Feishu-only readers cannot create locally bound decisions without a local source.
+See [AI-OPERATIONS.md](AI-OPERATIONS.md); uploads are a separately authorized step.
 
 An identical existing connector is kept. A conflicting/disabled/malformed
 connector or an unrecognized inspection failure stops before any registration.
