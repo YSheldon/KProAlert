@@ -29,7 +29,7 @@ separate pending task; stdio compatibility alone is not Grok Bot installation pr
 The public release branch does not pretend that a Codex manifest is a Grok Bot
 manifest. Use `falconpro.py setup --client grok` to produce the real
 `AddMcpServer` handoff, then verify the actual Grok process. Endpoint installation
-and upgrade still require the local Windows flow in LIFECYCLE.md; a Grok cloud
+and upgrade require [NATIVE-INSTALL.md](NATIVE-INSTALL.md)'s signed EXE flow; a Grok cloud
 runtime cannot perform them.
 
 Verification: run scripts/test_feishu_reader.py and scripts/test_mcp_stdio.py

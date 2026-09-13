@@ -1,5 +1,9 @@
 # Signed Windows release contract
 
+**Historical script-release contract.** The native EXE path and its signed PE
+catalog are described in [NATIVE-INSTALL.md](NATIVE-INSTALL.md). The script
+descriptor and older platform matrix below do not define native Rust admission.
+
 No binary release is published until all gates pass. The public installer must
 consume an immutable versioned release and a trusted expected manifest SHA-256,
 not a mutable latest URL or file-supplied checksum alone.

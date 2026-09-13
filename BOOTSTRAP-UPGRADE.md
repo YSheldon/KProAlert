@@ -1,5 +1,9 @@
 # FalconPro Acquisition And Upgrade Status
 
+**Historical script acquisition reference.** The current native EXE download and
+upgrade contract is [NATIVE-INSTALL.md](NATIVE-INSTALL.md). Do not use the scripts
+below as fallback when the native stable release is unavailable.
+
 The new [LIFECYCLE.md](LIFECYCLE.md) describes the executable ordinary-service
 upgrade path, durable recovery and common CLI. The older `upgrade_state.py`
 library below remains a non-executing model and does not grant native authority.

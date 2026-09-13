@@ -1,6 +1,6 @@
 {
   "name": "kpro-alerts",
-  "version": "0.2.2-preview",
+  "version": "0.2.3-preview",
   "description": "Guided local FalconPro setup and read-only security event analysis.",
   "author": {
     "name": "Local developer"

@@ -9,18 +9,19 @@ This repository contains no drivers, signing material, credentials or telemetry.
 It is a clean source export, not a mirror of private repository history.
 
 For the user-facing installation workflow, read [START-HERE.md](START-HERE.md).
-The common setup, signed download, installation, upgrade and opt-in statistics
-entry is [falconpro.py](falconpro.py); see [LIFECYCLE.md](LIFECYCLE.md).
+The endpoint entry is the signed native EXE workflow in
+[NATIVE-INSTALL.md](NATIVE-INSTALL.md). Connector setup and opt-in statistics
+remain separate utilities; `falconpro.py` is not the default endpoint installer.
 The binary release and automatic notification gates are not complete yet.
 The current public GitHub release is still a controlled validation candidate;
 the lifecycle source is implemented and tested, but it is not a stable GA
-release until the signed onboarding v2 bundle and native upgrade evidence pass.
+release until complete signed native catalogs/packages and applicable gates pass.
 
 ## One Address, Two Components
 
 Give the repository URL to your assistant and follow [START-HERE.md](START-HERE.md).
 The assistant connector and the Windows protection service are separate components.
-The common `falconpro.py` entry handles their setup; connecting MCP alone never
+The native EXE handles protection; `falconpro.py setup` handles connectors. MCP alone never
 means that a driver is installed or protection is active.
 
 **RemoteX, SSH and SFTP are not end-user installation dependencies.** They may be
@@ -57,8 +58,8 @@ The user reported successful registration and discovery of both tools in Grok Bo
 via custom stdio MCP with no data sources configured. This is not proof of native
 marketplace installation, live telemetry delivery or unattended operation.
 
-Installer and ordinary-service upgrade sources are included. The new lifecycle
-entry requires signed onboarding assets and same-candidate native acceptance
+Historical script installer and ordinary-service upgrade sources are retained;
+native Rust source is private. The native lifecycle requires signed catalog/package assets and same-candidate acceptance
 before public installation is enabled. Treat this as a preview, not a completed
 general-availability release.
 

@@ -6,6 +6,11 @@ preview, not a verified one-click protection release.
 
 ## Isolated Python environment
 
+This section configures the AI connector only. Windows installation and upgrade
+use [NATIVE-INSTALL.md](NATIVE-INSTALL.md) and signed native EXEs, without an
+endpoint Python, PowerShell 5.1 or .NET dependency. Do not use the historical
+PowerShell installer as the default endpoint path.
+
 Requires Python 3.10+ on the AI tool execution host, independently of the driver's
 Windows compatibility matrix. Python/MCP installation on Win7 is not supported here.
 
