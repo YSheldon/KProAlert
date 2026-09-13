@@ -13,6 +13,7 @@ from feishu_reader import read
 from guidance import advise
 from collector_health import read_health
 from endpoint import probe
+from operations import V1_CAPABILITIES
 
 _source_hash = hashlib.sha256(b''.join(
     Path(__file__).with_name(name).read_bytes()
@@ -30,6 +31,7 @@ append_record = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idemp
 def integration_status() -> dict:
     """Identify the running code and configured sources, without exposing paths or credentials."""
     return dict(version=_plugin_version, mcpSdkVersion=_sdk_version, codeSha256=_source_hash, processId=_started_pid,
+                **V1_CAPABILITIES,
                 localConfigured=bool(os.environ.get('KPRO_ALERT_DATABASE')),
                 endpointBindingConfigured=bool(os.environ.get('KPRO_ENDPOINT_DEVICE_ID')),
                 feishuConfigured=all(os.environ.get(k) for k in

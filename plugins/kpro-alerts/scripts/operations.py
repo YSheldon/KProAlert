@@ -20,6 +20,8 @@ REASONS = ('bulk_overwrite', 'ransom_note', 'format_mismatch', 'rename_burst',
 ACTIONS = ('investigate', 'switch_to_audit', 'switch_to_enforce', 'terminate_process',
            'quarantine_file', 'delete_file', 'add_exception', 'restore_backup', 'isolate_network')
 MAX_RECORDS = 100000
+V1_CAPABILITIES = dict(releaseScope='existing_driver_events_v1', driverChangeRequired=False,
+                       policyMutationAvailable=False, aiActionExecutionAvailable=False)
 
 
 def canonical(value):
@@ -321,6 +323,7 @@ class Operations:
 
     def status(self):
         return dict(schema='FalconProOperationsStatus/v1',
+                    **V1_CAPABILITIES,
                     records=self.db.execute('SELECT COUNT(*) FROM ops_records').fetchone()[0],
                     deliveryStates=dict(self.db.execute('SELECT state,COUNT(*) FROM ops_outbox GROUP BY state')),
                     automaticRemediation=False, nativeActionBroker='not_integrated',
@@ -349,10 +352,11 @@ def preview(path, limit=100):
 
 def status(path):
     if not Path(path).is_file():
-        return dict(state='not_initialized', automaticRemediation=False)
+        return dict(state='not_initialized', automaticRemediation=False, **V1_CAPABILITIES)
     db = _source(path)
     try:
         return dict(schema='FalconProOperationsStatus/v1',
+                    **V1_CAPABILITIES,
                     records=db.execute('SELECT COUNT(*) FROM ops_records').fetchone()[0],
                     deliveryStates=dict(db.execute('SELECT state,COUNT(*) FROM ops_outbox GROUP BY state')),
                     automaticRemediation=False, nativeActionBroker='not_integrated')

@@ -5,6 +5,13 @@ description: Guide user-confirmed FalconPro setup and evidence-bound event analy
 
 # FalconPro Alerts
 
+First release analyzes events from the existing signed driver. Keep the installed
+policy and protection behavior; do not request a new driver or switch to Audit
+for analysis. Extended Audit events, mode switching and native AI execution are
+phase two. Preserve existing installation/signature/health gates, but do not
+invent a new driver prerequisite for event analysis. Engine action results are
+not actions executed by this AI connector.
+
 An installation request starts at START-HERE.md and NATIVE-INSTALL.md, not at a
 database query. Distinguish connector registration from actual Windows service
 and driver installation. RemoteX/SSH/SFTP are not user prerequisites; use the

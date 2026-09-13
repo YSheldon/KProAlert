@@ -1,21 +1,40 @@
-# Audit, AI Assessment And Operations Return
+# Existing Events, AI Assessment And Operations Return
 
 ## Current Status
 
-The connector supports five client adapters and a common stdio MCP contract.
-Assessments and unapproved action requests can be stored and explicitly uploaded
-with exact Feishu readback. The native action broker, installed mode switching,
-and five-client runtime acceptance are not complete. No automatic termination,
-quarantine, deletion, exception or isolation is exposed by this preview.
+First-release scope, confirmed by the user: analyze only events already produced
+by the existing signed driver. Preserve the installed signed policy and native
+protection behavior. No driver update, re-signing, PPL change or new audit policy
+is required for this analysis feature. Do not switch a protected endpoint to
+Audit or disable existing protection to feed the AI.
 
-## Signed Protection Modes
+The five adapters share the same MCP contract. Assessments, recommendations and
+unapproved request records can be stored and explicitly uploaded with exact
+Feishu readback. First-release AI does not execute termination, quarantine,
+deletion, exceptions, isolation or policy changes. Existing driver blocking and
+termination still operate according to the installed policy; they are observed
+engine results, not actions performed by the AI.
+
+`integration_status` declares `releaseScope=existing_driver_events_v1`,
+`driverChangeRequired=false`, `policyMutationAvailable=false` and
+`aiActionExecutionAvailable=false`. These are feature capabilities, not evidence
+that a particular endpoint is installed or healthy.
+
+Signed mode switching, the native action broker and extended driver Audit events
+are phase-two work, not first-release blockers. Real data delivery, five-client
+runtime and notification acceptance, authorized uploads, and applicable existing
+package installation/upgrade gates still apply to the first release.
+
+## Phase Two Only: Signed Protection Modes
 
 | Profile | decisionMode | PolicyFlags for ransomware-only defaults | Effect |
 | --- | --- | --- | --- |
 | enforce | 3 | 5 | Existing maximum profile, including approved risk blocking |
 | audit | 1 | 1 | Ransomware signals retained, risk blocking disabled |
 
-These are signing-service templates, not unsigned settings the AI may apply.
+These retained templates are not part of first-release mode switching and must
+not be dispatched or installed automatically for first-release analysis.
+They are signing-service templates, not unsigned settings the AI may apply.
 The private signer validates the profile, generates the envelope, and preserves
 the existing driver public key. The endpoint must authenticate that envelope and
 read back the effective policy after user-approved application. Changing a local
@@ -110,6 +129,8 @@ Unit and real stdio MCP transport tests cover binding, replay rejection, privacy
 request-only semantics and uncertain-send reconciliation. A simulated assessment
 and action request have been written to the authorized Feishu analysis table and
 read back. These are communication tests, not real threats or real actions.
-Native approval/action results, policy application/restart, physical-host audit
-events/performance, ZCode runtime and all five native automation channels remain
-release gates. Do not count these as passed from connector tests.
+First-release acceptance requires the existing signed driver/DLL event stream,
+source health/loss evidence, actual client invocation, authorized notification
+delivery and summary readback. New native action results, policy application and
+new audit-driver tests are deferred phase-two gates. Do not claim either phase
+passed merely from connector tests.
