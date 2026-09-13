@@ -50,7 +50,20 @@ def main():
     statistics=commands.add_parser('statistics')
     statistics.add_argument('--input',required=True)
     statistics.add_argument('--complete',action='store_true')
+    native_metrics=commands.add_parser('metrics-native',help='Read a verified native transaction into existing opt-in metrics')
+    native_metrics.add_argument('--database',required=True)
+    native_metrics.add_argument('--entry',required=True)
+    native_metrics.add_argument('--entry-sha256',required=True)
+    native_metrics.add_argument('--device-id',required=True)
+    native_metrics.add_argument('--transaction',required=True)
     args=parser.parse_args()
+    if args.command=='metrics-native':
+        from native_observation import collect_native_observation
+        from native_receipt_reader import read_receipt
+        event=collect_native_observation(args.database,lambda:read_receipt(
+            args.entry,args.entry_sha256,args.device_id,args.transaction))
+        return dict(state='metrics_recorded' if event else 'metrics_disabled',
+                    event=event,uploaded=False,installPerformed=False)
     if args.command=='status':
         from endpoint import probe
         return probe(args.device_id)
