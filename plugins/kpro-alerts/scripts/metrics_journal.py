@@ -69,23 +69,37 @@ class Journal:
             self.db.execute('DELETE FROM metrics_events')
             self.db.execute('DELETE FROM metrics_meta')
 
-    def record(self,*,kind,version,architecture,os_family,state='unknown',day=None):
+    def record(self,*,kind,version,architecture,os_family,state='unknown',day=None,
+               observation_key=None):
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
             identity=self._identity()
             if not identity:
                 return None
+            if observation_key is not None and (not isinstance(observation_key,str) or
+                    not re.fullmatch('[a-f0-9]{64}',observation_key)):
+                raise ValueError('Opaque observation digest required')
             event=make_event(consent=True,installation_id=identity,event_id=secrets.token_hex(16),
                 day=int(time.time()//86400) if day is None else day,kind=kind,version=version,
                 architecture=architecture,os_family=os_family,state=state,
                 simulated=self.db.execute("SELECT value FROM metrics_meta WHERE key='simulated'").fetchone()==('1',))
             dedupe=None
-            if kind in ('status','install_success','uninstall','upgrade_success'):
+            if observation_key is not None:
+                # Local idempotency only; callers must independently verify receipts.
+                material=['FalconProMetricsObservation/v1',identity,observation_key]
+                dedupe=hashlib.sha256(json.dumps(material,separators=(',',':')).encode()).hexdigest()
+            elif kind in ('status','install_success','uninstall','upgrade_success'):
                 parts={k:v for k,v in event.items() if k!='eventId'}
                 dedupe=hashlib.sha256(json.dumps(parts,sort_keys=True).encode()).hexdigest()
+            if dedupe is not None:
                 old=self.db.execute('SELECT id,substr(payload,1,4097) FROM metrics_events WHERE dedupe=?',(dedupe,)).fetchone()
                 if old:
-                    return self._validated(*old)
+                    previous=self._validated(*old)
+                    if observation_key is not None:
+                        comparable=lambda value: {k:v for k,v in value.items() if k not in ('eventId','day')}
+                        if comparable(previous)!=comparable(event):
+                            raise ValueError('Observation identity reused with changed facts')
+                    return previous
             if self.db.execute('SELECT COUNT(*) FROM metrics_events').fetchone()[0]>=2048:
                 raise ValueError('Metrics journal capacity reached; protection must continue independently')
             self.db.execute('INSERT INTO metrics_events VALUES (?,?,?,?,NULL)',

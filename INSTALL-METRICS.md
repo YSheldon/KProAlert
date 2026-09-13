@@ -128,3 +128,10 @@ transaction receipt as evidence for a separately authorized metrics workflow.
 Do not pass script-only flags, assume native receipts automatically upload
 statistics, or use a cloud host's state as a local installation event. The native
 receipt-to-metrics handoff still requires implementation and runtime acceptance.
+
+The local journal supports an internal opaque observation digest for once-only
+recording across days. It is namespaced to the random consenting installation ID,
+never exported, and does not reset an acknowledged or uncertain delivery state.
+Reusing an observation with conflicting facts is rejected. This is idempotency,
+not receipt authentication: a caller must first validate the native observation.
+There is no automatic native import or new network upload in this helper.
