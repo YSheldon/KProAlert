@@ -44,6 +44,11 @@ class InstallMetricsTests(unittest.TestCase):
         self.assertEqual(result['successfulInstallations'],0)
         self.assertIsNone(result['uniqueUsers'])
 
+    def test_windows8_is_an_explicit_os_family(self):
+        event=self.event()
+        event['osFamily']='windows8'
+        self.assertEqual(validate_event(event)['osFamily'],'windows8')
+
     def test_simulations_are_excluded(self):
         event=self.event()
         event['simulated']=True

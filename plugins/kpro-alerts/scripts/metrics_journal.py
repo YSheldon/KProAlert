@@ -40,14 +40,28 @@ class Journal:
         row=self.db.execute("SELECT value FROM metrics_meta WHERE key='installation'").fetchone()
         return row[0] if row else None
 
+    def _simulation_mode(self):
+        row=self.db.execute("SELECT value FROM metrics_meta WHERE key='simulated'").fetchone()
+        if row not in (('0',),('1',)):
+            raise ValueError('Invalid metrics simulation mode')
+        return row == ('1',)
+
+    def consent_binding(self):
+        """Capture the current opt-in identity and mode without collecting data."""
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            identity=self._identity()
+            if not identity:
+                return None
+            return dict(installation_id=identity, simulated=self._simulation_mode())
+
     def _validated(self,event_id,payload):
         if not isinstance(payload,str) or len(payload)>4096:
             raise ValueError('Invalid stored metrics payload')
         event=validate_event(json.loads(payload))
         if event['eventId']!=event_id or event['installationId']!=self._identity():
             raise ValueError('Stored metrics identity mismatch')
-        mode=self.db.execute("SELECT value FROM metrics_meta WHERE key='simulated'").fetchone()
-        if mode not in (('0',),('1',)) or event['simulated']!=(mode==('1',)):
+        if event['simulated'] != self._simulation_mode():
             raise ValueError('Stored simulation identity mismatch')
         return event
 
@@ -60,7 +74,7 @@ class Journal:
                 self.db.execute("INSERT INTO metrics_meta VALUES ('installation',?)",
                                 (new_installation_id(consent=True),))
                 self.db.execute("INSERT INTO metrics_meta VALUES ('simulated',?)",('1' if simulated else '0',))
-            elif self.db.execute("SELECT value FROM metrics_meta WHERE key='simulated'").fetchone() != ('1' if simulated else '0',):
+            elif self._simulation_mode() != simulated:
                 raise ValueError('Do not mix simulation and production identities')
 
     def disable(self):
@@ -70,19 +84,31 @@ class Journal:
             self.db.execute('DELETE FROM metrics_meta')
 
     def record(self,*,kind,version,architecture,os_family,state='unknown',day=None,
-               observation_key=None):
+               observation_key=None,expected_installation_id=None,
+               expected_simulated=None):
+        if (expected_installation_id is not None and
+                (not isinstance(expected_installation_id,str) or
+                 not re.fullmatch('[a-f0-9]{32}',expected_installation_id))):
+            raise ValueError('Invalid expected metrics identity')
+        if expected_simulated is not None and type(expected_simulated) is not bool:
+            raise ValueError('Invalid expected simulation mode')
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
             identity=self._identity()
+            if expected_installation_id is not None and identity != expected_installation_id:
+                raise ValueError('Metrics consent changed during observation')
             if not identity:
                 return None
             if observation_key is not None and (not isinstance(observation_key,str) or
                     not re.fullmatch('[a-f0-9]{64}',observation_key)):
                 raise ValueError('Opaque observation digest required')
+            simulated=self._simulation_mode()
+            if expected_simulated is not None and simulated != expected_simulated:
+                raise ValueError('Metrics simulation mode changed during observation')
             event=make_event(consent=True,installation_id=identity,event_id=secrets.token_hex(16),
                 day=int(time.time()//86400) if day is None else day,kind=kind,version=version,
                 architecture=architecture,os_family=os_family,state=state,
-                simulated=self.db.execute("SELECT value FROM metrics_meta WHERE key='simulated'").fetchone()==('1',))
+                simulated=simulated)
             dedupe=None
             if observation_key is not None:
                 # Local idempotency only; callers must independently verify receipts.

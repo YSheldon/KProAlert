@@ -127,7 +127,8 @@ The native Rust entry does not accept --metrics-database. Follow
 transaction receipt as evidence for a separately authorized metrics workflow.
 Do not pass script-only flags, assume native receipts automatically upload
 statistics, or use a cloud host's state as a local installation event. The native
-receipt-to-metrics handoff still requires implementation and runtime acceptance.
+receipt-to-metrics handoff source is implemented below; signed-native runtime
+acceptance and destination upload evidence remain separate release gates.
 
 The local journal supports an internal opaque observation digest for once-only
 recording across days. It is namespaced to the random consenting installation ID,
@@ -135,3 +136,75 @@ never exported, and does not reset an acknowledged or uncertain delivery state.
 Reusing an observation with conflicting facts is rejected. This is idempotency,
 not receipt authentication: a caller must first validate the native observation.
 There is no automatic native import or new network upload in this helper.
+
+## Verified Native Receipt Import
+
+After explicit metrics opt-in, the assistant can use `falconpro.py metrics-native`
+with `--database`, `--entry`, `--entry-sha256`, `--device-id` and `--transaction`.
+The entry hash must come from the admitted signed release, not from an arbitrary
+receipt file. The Windows AI-host adapter pins the entry and its ancestors,
+checks its hash and existing publisher policy, and invokes only the read-only
+native `receipt` command. It accepts no JSON receipt file and never elevates,
+installs, stops services, reboots or uploads. Without an existing enabled journal
+it does not create a database or invoke the reader.
+
+The native EXE itself has no interpreter dependency. This optional Python MCP-host
+adapter uses that host's system PowerShell for publisher verification, with only
+the child process module path restricted to its system modules. It is not the
+endpoint installer and does not add an endpoint Python requirement.
+
+Windows8/8.1 observations use `windows8`, a newly supported metrics OS-family
+value. Update receiving validators/choice fields before enabling this platform;
+never relabel it as Windows7/10. Null historical OS classification is rejected.
+The currently published preview .2 predates `receipt`; it must fail as unsupported,
+not fall back to trusting JSON. A signed compatible entry and runtime acceptance
+are required before this new source path is declared available to users.
+
+## Verified Native Observation Bridge
+
+The transport-free bridge is
+`plugins/kpro-alerts/scripts/native_observation.py`:
+
+```python
+collect_native_observation(database, reader)
+```
+
+`reader` must be a callable supplied by the separately verified native entry
+point. It must return an object, not a path, JSON string, file, or imported
+receipt. The bridge has no native process launcher, CLI input, network call, or
+upload path. With no existing metrics opt-in, it returns without invoking the
+reader and records nothing.
+
+The reader result must contain exactly these ten keys:
+
+```text
+schema, observationId, operation, phase, version,
+architecture, osFamily, day, testOnly, protectionVerified
+```
+
+The accepted values are:
+
+- `schema` is `FalconProNativeObservation/v1`.
+- `observationId` is exactly 64 lowercase hexadecimal characters.
+- `operation` is `install` or `upgrade`; `phase` is `complete`.
+- `version` has four numeric components, and `architecture` is `x86`, `x64`,
+  or `arm64`.
+- `osFamily` is `windows7`, `windows8`, `windows10`, or `windows11`.
+  `windows8` covers Windows 8 and 8.1; a null or unknown OS is
+  rejected rather than guessed.
+- `day` is a non-future UTC epoch day; `testOnly` is an explicit boolean and
+  `protectionVerified` must be exactly `false`.
+
+After validation, `install` maps to `install_success` and `upgrade` maps to
+`upgrade_success`. The stored metric always uses `state=unknown`; the native
+observation ID is used only as the journal's internal opaque dedupe key and is
+not exported as a public metric field. Device IDs, SIDs, paths, and command
+lines are rejected as observation fields and are not stored or exported in
+metrics. The local adapter still uses a device ID to bind the native request.
+
+The bridge captures the initial consenting installation identity and simulation
+mode before reading. The journal rechecks both values inside the same atomic
+record transaction, so a disable/re-enable or simulation-mode race fails
+closed. `testOnly=true` is accepted only by a simulation journal; such events
+carry `simulated=true` and are excluded from production statistics. Production
+observations cannot be written to a simulation journal.
