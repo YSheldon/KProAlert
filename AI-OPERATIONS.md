@@ -37,7 +37,11 @@ not a deletion event; actual disposition and FILE_DELETE_ON_CLOSE are separate.
 Audit observes selected engine events, not every I/O. Paging/high-IRQL,
 cleanup-complete, recursive or unavailable-name paths retain safety guards.
 Queues and storage have bounds; check loss and health before interpreting silence.
-Existing critical-directory root-process exemptions remain applicable.
+Audit records matched requests even from callers that would be exempt in Block;
+it does not predict a denial or evaluate grant/root-process exceptions. Block
+exemption behavior is unchanged. Ordinary audit WRITE uses only cached names;
+a cache miss is a coverage limit, not permission to perform a synchronous query
+on every write. DR0 name-query failures contribute to the existing health counter.
 
 ## Configure And Analyze
 
