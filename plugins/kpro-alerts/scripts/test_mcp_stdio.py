@@ -15,8 +15,8 @@ async def main():
             initialized = await session.initialize()
             assert initialized.serverInfo.name == 'FalconPro'
             result = await session.list_tools()
-            assert {t.name for t in result.tools} == {'local_alerts', 'feishu_alerts', 'integration_status', 'alert_guidance', 'collector_status', 'endpoint_status'}
-            assert all(t.annotations.readOnlyHint for t in result.tools)
+            assert {t.name for t in result.tools} == {'local_alerts', 'feishu_alerts', 'integration_status', 'alert_guidance', 'collector_status', 'endpoint_status', 'operations_events', 'operations_status', 'assess_event', 'propose_action'}
+            assert all(t.annotations.readOnlyHint == (t.name not in {'assess_event','propose_action'}) for t in result.tools)
             for name in ('local_alerts', 'feishu_alerts'):
                 reply = await session.call_tool(name, {'limit': 1})
                 assert 'not configured' in str(reply)

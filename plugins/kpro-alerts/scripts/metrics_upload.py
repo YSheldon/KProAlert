@@ -78,7 +78,7 @@ def _receipt(payload):
     return receipt
 
 
-def _readback_record(payload, receipt):
+def _readback_record(payload, receipt, *, require_identity=False):
     if payload.get('ok') is not True:
         raise RuntimeError('Feishu readback failed')
     data = payload.get('data')
@@ -90,6 +90,7 @@ def _readback_record(payload, receipt):
     if has_more is True:
         raise RuntimeError('Feishu readback was not bounded to one record')
     record_ids = data.get('record_id_list')
+    identity_verified = record_ids == [receipt]
     if record_ids is not None:
         if not isinstance(record_ids, list) or len(record_ids) != 1 or record_ids[0] != receipt:
             raise RuntimeError('Feishu readback receipt mismatch')
@@ -107,6 +108,7 @@ def _readback_record(payload, receipt):
         if len(data['items']) != 1 or not isinstance(data['items'][0], dict):
             raise RuntimeError('Feishu readback record count invalid')
         item = data['items'][0]
+        identity_verified = identity_verified or item.get('record_id') == receipt
         record = item.get('fields')
         if not isinstance(record, dict):
             raise RuntimeError('Feishu readback fields missing')
@@ -116,6 +118,7 @@ def _readback_record(payload, receipt):
         if len(data['records']) != 1 or not isinstance(data['records'][0], dict):
             raise RuntimeError('Feishu readback record count invalid')
         item = data['records'][0]
+        identity_verified = identity_verified or item.get('record_id') == receipt
         record = item.get('fields')
         if not isinstance(record, dict):
             raise RuntimeError('Feishu readback fields missing')
@@ -123,6 +126,7 @@ def _readback_record(payload, receipt):
             record = {**record, 'record_id': item['record_id']}
     elif isinstance(data.get('record'), dict):
         raw_record = data['record']
+        identity_verified = identity_verified or raw_record.get('record_id') == receipt
         record = raw_record.get('fields', raw_record)
         if not isinstance(record, dict):
             raise RuntimeError('Feishu readback fields missing')
@@ -134,6 +138,8 @@ def _readback_record(payload, receipt):
     returned_receipt = record.get('record_id') or record.get('recordId')
     if returned_receipt is not None and returned_receipt != receipt:
         raise RuntimeError('Feishu readback receipt mismatch')
+    if require_identity and not identity_verified:
+        raise RuntimeError('Feishu readback record identity missing')
     return record
 
 

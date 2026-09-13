@@ -17,13 +17,14 @@ def main():
     status=commands.add_parser('status')
     status.add_argument('--device-id',default=os.environ.get('KPRO_ENDPOINT_DEVICE_ID',''))
     setup=commands.add_parser('setup')
-    setup.add_argument('--client',choices=['codex','grok','workbuddy','cursor'],required=True)
+    setup.add_argument('--client',choices=['codex','grok','workbuddy','cursor','zcode'],required=True)
     setup.add_argument('--database')
     setup.add_argument('--cli')
     setup.add_argument('--base')
     setup.add_argument('--table')
     setup.add_argument('--collector-health')
     setup.add_argument('--device-id')
+    setup.add_argument('--operations-database')
     setup.add_argument('--apply',action='store_true')
     for verb in ('install','upgrade'):
         command=commands.add_parser(verb)
@@ -56,7 +57,28 @@ def main():
     native_metrics.add_argument('--entry-sha256',required=True)
     native_metrics.add_argument('--device-id',required=True)
     native_metrics.add_argument('--transaction',required=True)
+    ops = commands.add_parser('operations', help='Evidence-bound AI operations and explicit summary upload')
+    ops.add_argument('action', choices=['status','events','upload','reconcile'])
+    ops.add_argument('--database', required=True)
+    ops.add_argument('--source', required=True)
+    ops.add_argument('--after', type=int, default=0)
+    ops.add_argument('--limit', type=int, default=100)
+    ops.add_argument('--cli')
+    ops.add_argument('--base')
+    ops.add_argument('--table')
+    ops.add_argument('--record-id')
+    ops.add_argument('--remote-record-id')
+    ops.add_argument('--apply', action='store_true')
     args=parser.parse_args()
+    if args.command=='operations':
+        from operations import status, events
+        if args.action=='status':return status(args.database)
+        if args.action=='events':return events(args.source,args.after,args.limit)
+        from operations_upload import upload, reconcile
+        if args.action=='reconcile':
+            if not args.apply:raise ValueError('Reconciliation changes local delivery state; --apply is required')
+            return reconcile(args.database,args.source,args.cli,args.base,args.table,args.record_id,args.remote_record_id)
+        return upload(args.database,args.source,args.cli,args.base,args.table,apply=args.apply,limit=args.limit)
     if args.command=='metrics-native':
         from native_observation import collect_native_observation
         from native_receipt_reader import read_receipt
@@ -86,13 +108,17 @@ def main():
     if args.command=='setup':
         from assistant_setup import make_plan,register
         value=make_plan(args.client,args.database,args.cli,args.base,args.table,
-                        collector_health=args.collector_health,endpoint_device_id=args.device_id)
+                        collector_health=args.collector_health,endpoint_device_id=args.device_id,
+                        operations_database=args.operations_database)
         if not args.apply:return value
         # Reuse native client interfaces, with a non-destructive Cursor merge.
         import importlib.metadata
         if importlib.metadata.version('mcp')!='1.30.0':raise ValueError('Install the pinned requirements first')
         if args.client=='cursor':
             from cursor_setup import configure
+            return configure(value['server'])
+        if args.client=='zcode':
+            from zcode_setup import configure
             return configure(value['server'])
         return register(value)
     from lifecycle import plan,read_json,apply

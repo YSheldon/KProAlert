@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 
-def build_config(database=None, cli=None, base=None, table=None, collector_health=None, endpoint_device_id=None, *, onboarding_only=False):
+def build_config(database=None, cli=None, base=None, table=None, collector_health=None, endpoint_device_id=None, *, onboarding_only=False, operations_database=None, assistant_client=None):
     if any((cli, base, table)) and not all((cli, base, table)):
         raise ValueError('Feishu requires CLI, base and table together')
     if type(onboarding_only) is not bool:
@@ -16,6 +16,10 @@ def build_config(database=None, cli=None, base=None, table=None, collector_healt
     if not database and not cli and not endpoint_device_id and not onboarding_only:
         raise ValueError('configure a local database or Feishu source')
     env = {}
+    if operations_database:
+        env['KPRO_OPERATIONS_DATABASE'] = str(Path(operations_database).resolve())
+        if assistant_client:
+            env['KPRO_ASSISTANT_CLIENT'] = assistant_client
     if endpoint_device_id:
         if not isinstance(endpoint_device_id,str) or not re.fullmatch('[a-f0-9]{64}',endpoint_device_id):
             raise ValueError('Confirm the local Windows device fingerprint before binding')

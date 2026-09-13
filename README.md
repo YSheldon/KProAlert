@@ -2,7 +2,7 @@
 
 Public preview of the FalconPro alert integration tools and Codex plugin packaging.
 
-FalconPro is the product name across Codex, Grok Bot, WorkBuddy and Cursor.
+FalconPro is the product name across Codex, Grok Bot, WorkBuddy, Cursor and ZCode.
 Existing repository URLs, `kpro-alerts` IDs, `KPRO_*` variables, protocol schemas
 and signed component filenames remain unchanged for compatibility. See [BRANDING.md](BRANDING.md).
 This repository contains no drivers, signing material, credentials or telemetry.
@@ -39,7 +39,9 @@ ordinary install/upgrade discovery.
 ## Capabilities
 
 - Read-only stdio MCP: integration_status, endpoint_status, collector_status,
-  local_alerts, feishu_alerts and alert_guidance.
+  local_alerts, feishu_alerts, alert_guidance, operations_events and operations_status.
+- Explicit append-only assess_event and propose_action tools. An action request is
+  neither human approval nor execution; the native action broker is not integrated.
 - Local SQLite import and deduplication of exported FalconPro event batches.
 - Explicitly configured Feishu summary publication; no automatic publication.
 - Standalone MCP configuration generation without overwriting client settings.
@@ -51,6 +53,11 @@ ordinary install/upgrade discovery.
 See INSTALL.md and GROK-BOT.md. Python 3.10+ is required on the MCP execution host.
 Install dependencies in an isolated virtual environment. Configure data sources
 and authorization independently on that host; never copy workstation credentials.
+
+See [AI-OPERATIONS.md](AI-OPERATIONS.md) for signed audit/enforce mode boundaries,
+evidence-bound assessments and opt-in operations upload, and [ZCODE.md](ZCODE.md)
+for the non-destructive ZCode connector adapter. These do not imply five-platform
+native runtime acceptance or an already published audit-capable driver.
 
 ## Validation boundary
 
