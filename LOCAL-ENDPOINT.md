@@ -1,5 +1,10 @@
 # FalconPro Local Endpoint Onboarding
 
+For endpoint installation, use the signed EXE `status` and lifecycle in
+[NATIVE-INSTALL.md](NATIVE-INSTALL.md), without requiring Python on the PC.
+The Python probe below is an optional existing MCP-host utility, not a prerequisite
+or fallback installation path. The actual-device binding rules still apply.
+
 ## Bind The Actual PC
 
 Codex, WorkBuddy, Cursor and Grok Bot must use an explicitly authorized channel
@@ -50,8 +55,8 @@ filter instances or enforcement. Connected MCP/empty alerts prove no protection.
 
 An ordinary user supplies the repository URL and confirms the intended local PC,
 not driver filenames, hashes, RemoteX profiles or SSH credentials. The assistant
-uses `falconpro.py status` to obtain the local identity, confirms it with the user,
-then uses `falconpro.py install --device-id <confirmed-device-id>`. The command
+uses the signed native EXE `status` to obtain the local identity, confirms it with
+the user, then uses `install --device <confirmed-device-id>`. The native command
 discovers an admitted release, downloads its signed assets and prepares the exact
 plan. After consent, `--plan <plan-path> --apply --approve` performs installation
 with normal UAC. `upgrade` uses the same release trust and preserved-state checks.
@@ -61,32 +66,18 @@ That is a partial installation, not clean absence. Inspect its provenance, offer
 a backed-up, specifically approved cleanup, then collect fresh endpoint facts.
 This is recovery of that PC's state, not a prerequisite for every user.
 
-The low-level example below is for reviewed integration/testing only. Do not ask
-ordinary users to assemble these parameters or use candidate validation permits.
-
-Download an immutable admitted public release through the normal download
-channel. Verify both package and onboarding-source manifest digests from a trusted
-release source, never an alert URL. Independently verify Install-FalconPro.ps1
-against the trusted source manifest BEFORE executing it; self-checks cannot
-authenticate a substituted entry script. Stage sources and package in an
-administrator-controlled directory for elevated execution, not a writable shared
-folder. The wrapper verifies all four source files before invoking helpers.
-
-```powershell
-.\Install-FalconPro.ps1 -ExpectedDeviceId <confirmed-device-id> -SourceManifestSha256 <trusted-source-manifest-sha256> -PackageRoot <verified-package> -ManifestSha256 <trusted-package-manifest-sha256> -DeliveryUserSid <local-user-sid>
-```
-
-Show the verified plan, device, package hash and privacy/export effects. Only
-after explicit approval of that device/package, run the same command in native
-administrator PowerShell with `-ApproveInstallation -Apply`. Normal UAC/admin
-consent is required. The wrapper rechecks identity and clean absence immediately
-before the existing signature/release-gated installer. It has no candidate
-bypass. No MCP tool installs software; further remediation needs separate consent.
+Follow NATIVE-INSTALL.md for the signed PE catalog, package verification and exact
+native lifecycle commands. Do not ask users to assemble low-level installer
+arguments or request validation permits. Historical script examples remain in
+LIFECYCLE.md for their original regression lanes only, not for user onboarding.
+Show the selected device, version and privacy/export effects before execution;
+preserve normal UAC and protected transaction readback. No read-only MCP tool
+installs software, and additional remediation requires separate consent.
 
 The current validation prerelease is not a verified production release. Stop at
 the release gate until an admitted package exists. Never edit a signed manifest
-to pass. This new wrapper/probe need signed packaging and local runtime acceptance
-before public automatic installation can be called ready.
+to pass. Complete signed native material publication and applicable runtime
+acceptance are required before public installation can be called ready.
 
 ## Verification And Monitoring
 
@@ -96,7 +87,7 @@ service alone is insufficient. User-enabled periodic checks may report changes,
 but must never reinstall or reset failures automatically. Unit/static tests do
 not replace physical-PC installation or UAC acceptance.
 
-Publishers generate `onboarding-source.json` with `build_onboarding_manifest.py`
+Historical script publishers generate `onboarding-source.json` with `build_onboarding_manifest.py`
 after script signing and publish its digest through the protected release channel.
 Recompute after any byte changes, including signing or line endings. Users must
 not generate a manifest from untrusted downloads and call it trusted. The manifest

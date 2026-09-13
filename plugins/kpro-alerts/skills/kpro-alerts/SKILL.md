@@ -5,11 +5,14 @@ description: Guide user-confirmed FalconPro setup through the common signed-rele
 
 # FalconPro Alerts
 
-An installation request starts at START-HERE.md and `falconpro.py`, not at a
+An installation request starts at START-HERE.md and NATIVE-INSTALL.md, not at a
 database query. Distinguish connector registration from actual Windows service
 and driver installation. RemoteX/SSH/SFTP are not user prerequisites; use the
 assistant's authorized local Windows channel. Never replace a missing stable
 release with a candidate or treat a cloud machine as the user's endpoint.
+Use the signed FalconProSetup.exe, FalconProSetup32.exe or FalconProSetupArm.exe.
+Never fall back to historical Python/PowerShell install scripts. Connector Python
+dependencies are separate, not endpoint installation prerequisites.
 
 For local detection and user-confirmed installation, follow `LOCAL-ENDPOINT.md`
 in the repository root. `endpoint_status` probes only the execution host: never
@@ -46,7 +49,7 @@ Receipt timestamps are collection times, not verified event occurrence times.
 
 The read-only MCP tools do not install FalconPro, start a background task, register a service,
 publish to Feishu, or wake Codex automatically. Installation/upgrade is a separate
-explicitly approved `falconpro.py` lifecycle. If no collector/database exists,
+explicitly approved native EXE lifecycle. If no collector/database exists,
 report that prerequisite instead of claiming monitoring is enabled.
 Driver installation, credential changes, real message publication, policy changes
 and remediation require their own explicit user-authorized workflow.

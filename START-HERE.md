@@ -1,8 +1,8 @@
 # Start here: install with your AI assistant
 
-Use [LIFECYCLE.md](LIFECYCLE.md) and the common `falconpro.py` entry for installation,
-upgrade, four-client setup and optional statistics. Existing release gates below
-still apply; the new executor needs its signed onboarding v2 distribution.
+Use [NATIVE-INSTALL.md](NATIVE-INSTALL.md) for native Windows installation and
+upgrade across all four clients. Connector setup and statistics are separate.
+The complete stable signed catalog/package distribution is still gated.
 
 For automatic local detection and installation after first confirmation, follow
 [LOCAL-ENDPOINT.md](LOCAL-ENDPOINT.md). Never treat the bot's cloud host as the PC.
@@ -42,12 +42,10 @@ missing verified release or an existing conflicting installation.
 3. Explain deterministic protection, the scope of signed policy, privacy/export
    choices, AI fees/availability and the effect on business-critical workflows.
    Confirm first machine installation and each high-risk additional action.
-4. Use `falconpro.py install --device-id <confirmed-device-id>` to download the
-   matching signed release and produce a plan. After approval, use
-   `falconpro.py install --plan <plan-path> --apply --approve`. Do not reconstruct
-   low-level installer arguments or ask an ordinary user to supply hashes. Use
-   `--resume` after a normal reboot and `upgrade` for later signed releases.
-   Public release admission is still required; do not bypass it for convenience.
+4. Use the signed architecture-matched EXE and the exact native install/upgrade/
+   resume contract in NATIVE-INSTALL.md. Do not substitute legacy scripts or
+   candidate permissions when stable materials are unavailable. Do not ask users
+   to invent hashes or plan paths. Preserve UAC and protected receipt readback.
 5. Configure the background bridge and destination independently from MCP. Raw
    events stay in access-controlled local storage; only approved fields are exported.
    A disconnected AI app must not disable protection. Surface loss/quota/sync errors.

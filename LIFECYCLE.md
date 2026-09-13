@@ -1,5 +1,10 @@
 # FalconPro Installation, Upgrade And Statistics
 
+**Historical script lifecycle reference.** The default Windows endpoint path is
+now [NATIVE-INSTALL.md](NATIVE-INSTALL.md). Install commands below remain only for
+existing script regression lanes, not fallback for a missing native release.
+Connector setup and metrics remain separate. Script plans are not Rust plans.
+
 Give Codex, Grok Bot, WorkBuddy or Cursor this address:
 https://github.com/YSheldon/KProAlert
 

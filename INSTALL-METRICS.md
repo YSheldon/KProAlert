@@ -115,9 +115,16 @@ of already uploaded records. Remote retention/deletion is managed in the
 user-authorized table. Never publish a global installation count from private
 tables the publisher cannot read: shared reporting requires explicit access.
 
-The common `falconpro.py` install/upgrade/resume entry accepts an existing opt-in
+The historical `falconpro.py` script install/upgrade/resume entry accepts an existing opt-in
 `--metrics-database`. It records observed starts and post-reboot completion;
 upgrade completion does not increment installation count. Native uncertain
 outcomes are not counted as definite failures. No cloud table is created and
 telemetry remains disabled until the user consents. Native upload/readback must
 be validated against the destination chosen by the user before claiming delivery.
+
+The native Rust entry does not accept --metrics-database. Follow
+[NATIVE-INSTALL.md](NATIVE-INSTALL.md) for endpoint execution and treat its verified
+transaction receipt as evidence for a separately authorized metrics workflow.
+Do not pass script-only flags, assume native receipts automatically upload
+statistics, or use a cloud host's state as a local installation event. The native
+receipt-to-metrics handoff still requires implementation and runtime acceptance.

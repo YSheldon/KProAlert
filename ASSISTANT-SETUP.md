@@ -1,14 +1,14 @@
 # One repository entry, separate components
 
-The common lifecycle entry is `falconpro.py`. This file covers MCP registration;
-read [LIFECYCLE.md](LIFECYCLE.md) for signed Windows installation, upgrade,
+This file covers MCP registration through `falconpro.py setup`;
+read [NATIVE-INSTALL.md](NATIVE-INSTALL.md) for signed EXE installation, upgrade,
 reboot resume, recovery and metrics upload. Registration never counts as driver
 installation or endpoint protection.
 
 Give Codex, Grok Bot, WorkBuddy or Cursor `https://github.com/YSheldon/KProAlert` and ask it to install **FalconPro** following
 START-HERE.md. The assistant must distinguish installing this query connector from
-installing Windows endpoint protection. Protection targets Windows 11 x64 and
-ARM64 workstations; a Linux Grok Bot cannot install a Windows driver into its own
+installing Windows endpoint protection. Platform admission follows the native
+guide; a Linux Grok Bot cannot install a Windows driver into its own
 container. RemoteX is not an end-user dependency. Use the AI client's existing
 local Windows execution capability.
 
