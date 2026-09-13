@@ -27,6 +27,11 @@ class OperationsMcpTests(unittest.IsolatedAsyncioTestCase):
                     async def call(name,args):
                         reply=await client.call_tool(name,args)
                         return json.loads(next(c.text for c in reply.content if c.type=='text'))
+                    capabilities=await call('integration_status',{})
+                    self.assertEqual(capabilities.get('releaseScope'),'existing_driver_events_v1')
+                    self.assertIs(capabilities.get('driverChangeRequired'),False)
+                    self.assertIs(capabilities.get('policyMutationAvailable'),False)
+                    self.assertIs(capabilities.get('aiActionExecutionAvailable'),False)
                     page=await call('operations_events',{'limit':10})
                     event=page['events'][0]
                     self.assertNotIn('PRIVATE', json.dumps(page))

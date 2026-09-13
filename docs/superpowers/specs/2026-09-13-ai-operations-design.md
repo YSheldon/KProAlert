@@ -1,9 +1,11 @@
 # FalconPro AI Operations
 
-User-approved scope: one repository entry for Codex, Grok Bot, Cursor, WorkBuddy
-and ZCode; signed enforce/audit profiles; asynchronous event assessment;
-per-action human authorization; local allowlisted execution; event/assessment/
-action-result return for security operations. Existing PPL release work continues.
+Latest user-approved first-release scope: one repository entry for Codex, Grok
+Bot, Cursor, WorkBuddy and ZCode, analyzing existing signed-driver events only.
+Preserve installed policy and native protection; no new driver or re-signing is
+needed for analysis. Return evidence-bound AI judgments and recommendations.
+Mode switching, extended driver Audit coverage and native approved execution are
+retained as phase-two design, not first-release prerequisites.
 
 ## Contracts
 
@@ -37,8 +39,10 @@ is inferred from a generated config or simulated MCP client.
 
 ## Delivery Work
 
-Implement and verify adapters, immutable assessment/action records and readback
-outbox first, then signed mode application and native per-action approval broker.
+First release verifies adapters, immutable assessments/recommendation requests,
+existing event delivery, native notifications and the readback outbox. A request
+record is not execution. Do not make the first release wait for new driver
+signing, signed mode application or the native per-action approval broker.
 Validate real stdio requests and tamper/replay/failure behavior; sign changed
 native artifacts and perform endpoint tests before public release claims.
 No production private key or local OAuth material is distributed to assistants.

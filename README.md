@@ -59,6 +59,12 @@ evidence-bound assessments and opt-in operations upload, and [ZCODE.md](ZCODE.md
 for the non-destructive ZCode connector adapter. These do not imply five-platform
 native runtime acceptance or an already published audit-capable driver.
 
+**First release analyzes existing signed-driver events only.** It preserves
+current policy and protection behavior; extended Audit driver coverage and
+native AI execution are deferred, not installation prerequisites. No new driver
+signature is required for this analysis feature. Existing package release and
+native-client acceptance gates still apply.
+
 ## Validation boundary
 
 The user reported successful registration and discovery of both tools in Grok Bot
