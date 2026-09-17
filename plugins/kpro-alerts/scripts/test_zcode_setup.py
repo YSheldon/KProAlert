@@ -42,3 +42,17 @@ class ZCodeSetupTests(unittest.TestCase):
                 configure(self.server, user_root=root, project_root=project)
             self.assertEqual(original, path.read_bytes())
             self.assertFalse((root / '.zcode/cli/config.json').exists())
+
+    def test_explicit_upgrade_preserves_environment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / '.zcode/cli').mkdir(parents=True)
+            path = root / '.zcode/cli/config.json'
+            old = {**self.server, 'command': 'old-python', 'env': {'KPRO_ALERT_DATABASE': 'old.db'}}
+            path.write_text(json.dumps({'mcp': {'servers': {'kpro-alerts': old}}}))
+            with self.assertRaises(ValueError):
+                configure(self.server, user_root=root, project_root=root)
+            result = configure(self.server, user_root=root, project_root=root, upgrade=True)
+            current = json.loads(path.read_text())['mcp']['servers']['kpro-alerts']
+            self.assertEqual(result['registration'], 'migrated')
+            self.assertEqual(current['env'], old['env'])

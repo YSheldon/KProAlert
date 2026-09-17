@@ -28,7 +28,7 @@ def read(path):
     return value, raw
 
 
-def configure(server, *, config_path=None, project_root=None):
+def configure(server, *, config_path=None, project_root=None, upgrade=False):
     from assistant_setup import equivalent
     target = Path(config_path) if config_path else Path.home() / '.cursor/mcp.json'
     project = Path(project_root or Path.cwd()) / '.cursor/mcp.json'
@@ -52,9 +52,19 @@ def configure(server, *, config_path=None, project_root=None):
         servers = settings.get('mcpServers', {})
         if 'kpro-alerts' in servers:
             actual = servers['kpro-alerts']
-            if not equivalent(actual, server) or actual.get('disabled') is True:
+            if actual.get('disabled') is True:
                 raise ValueError('Existing connector differs or is disabled; no settings changed')
-            return dict(registration='unchanged', clientRuntimeVerified=False)
+            if equivalent(actual, server):
+                return dict(registration='unchanged', clientRuntimeVerified=False)
+            if not upgrade:
+                raise ValueError('Existing connector differs or is disabled; no settings changed')
+            old_env=actual.get('env', {})
+            if not isinstance(old_env, dict) or not all(isinstance(k,str) and isinstance(v,str) for k,v in old_env.items()):
+                raise ValueError('Existing connector environment is invalid; no settings changed')
+            server={**server,'env':dict(old_env)}
+            registration='migrated'
+        else:
+            registration='configured'
         settings['mcpServers'] = {**servers, 'kpro-alerts': server}
         if before is not None:
             backup = target.with_name(target.name + '.falconpro-' + secrets.token_hex(8) + '.bak')
@@ -72,8 +82,9 @@ def configure(server, *, config_path=None, project_root=None):
         actual, _ = read(target)
         if not equivalent(actual['mcpServers']['kpro-alerts'], server):
             raise ValueError('Cursor configuration readback failed')
-        return dict(registration='configured', clientRuntimeVerified=False,
-                    protectionInstalled=False, preservedExistingServers=True)
+        return dict(registration=registration, clientRuntimeVerified=False,
+                    protectionInstalled=False, preservedExistingServers=True,
+                    preservedExistingEnvironment=registration == 'migrated')
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
