@@ -58,6 +58,10 @@ missing verified release or an existing conflicting installation.
    new code, then verify integration_status codeSha256 and processId.
    Prefer [ASSISTANT-SETUP.md](ASSISTANT-SETUP.md) for native Codex/WorkBuddy
    registration or Grok host-tool handoff instead of manually reconstructing paths.
+   To move an existing Codex, WorkBuddy, Cursor or ZCode connector to a newer
+   checkout, use the explicit `falconpro.py setup --client <name> --update --apply`
+   path. It backs up or atomically updates only the named connector and preserves
+   configured data-source environment values. Grok remains an AddMcpServer handoff.
 7. Verify a clearly labeled synthetic event first, followed by an authorized benign
    real trigger. Match alert ID, event type, operation and actual outcome end to end.
    Synthetic alerts must be excluded from real statistics and remediation.

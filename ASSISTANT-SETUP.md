@@ -35,6 +35,23 @@ their supported registration interfaces. It does not download a new client.
 .\.venv\Scripts\python.exe plugins/kpro-alerts/scripts/assistant_setup.py --client codex --database "$env:LOCALAPPDATA\KProAlert\events.db" --apply
 ```
 
+## Updating An Existing Connector
+
+Use the common entry with an explicit update request. It is the only path that
+replaces an existing `kpro-alerts` entry:
+
+```powershell
+.\.venv\Scripts\python.exe falconpro.py setup --client codex --update --apply
+```
+
+Codex and WorkBuddy back up their native configuration before replacement.
+Cursor and ZCode use a locked atomic configuration update and preserve the prior
+file as a backup. Existing data-source environment values are retained; a disabled,
+malformed, conflicting, or project-overridden connector is not changed. After the
+client reloads MCP servers, call `integration_status` and verify its `codeSha256`.
+This updates only the query connector. It neither installs FalconPro protection
+nor uploads data or enables remediation.
+
 Use `--client workbuddy` for WorkBuddy. For a cloud reader, replace `--database`
 with explicit `--cli <lark-cli> --base <authorized-base> --table <table>` after
 independent OAuth login on that host. Tokens are not copied into generated config.
