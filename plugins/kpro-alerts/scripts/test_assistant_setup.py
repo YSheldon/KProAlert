@@ -2,7 +2,7 @@ import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
-from assistant_setup import make_plan, register, equivalent
+from assistant_setup import make_plan, register, migrate, equivalent
 
 
 class AssistantSetupTests(unittest.TestCase):
@@ -105,6 +105,57 @@ class AssistantSetupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             plan=self.plan(Path(d))
             self.assertTrue(equivalent(plan['server'],plan['server']))
+
+    def test_migration_preserves_existing_environment_and_reads_back(self):
+        with tempfile.TemporaryDirectory() as d:
+            plan=self.plan(Path(d))
+            old=dict(command='old-python',args=['old-server.py'],env={'KPRO_FEISHU_BASE':'base','KPRO_FEISHU_TABLE':'table'})
+            expected={**plan['server'], 'env': old['env']}
+            replies=[
+                SimpleNamespace(returncode=0,stdout=__import__('json').dumps({'transport':old}),stderr=''),
+                SimpleNamespace(returncode=0,stdout='removed',stderr=''),
+                SimpleNamespace(returncode=0,stdout='added',stderr=''),
+                SimpleNamespace(returncode=0,stdout=__import__('json').dumps({'transport':expected}),stderr=''),
+            ]
+            calls=[]
+            def runner(args, **kwargs):
+                calls.append(args); return replies.pop(0)
+            result=migrate(plan,runner)
+            self.assertEqual(result['registration'],'migrated')
+            self.assertTrue(result['preservedExistingEnvironment'])
+            self.assertIn('remove',calls[1])
+            self.assertIn('add',calls[2])
+            self.assertFalse(replies)
+
+    def test_migration_refuses_disabled_or_readback_mismatch(self):
+        with tempfile.TemporaryDirectory() as d:
+            plan=self.plan(Path(d))
+            disabled=SimpleNamespace(returncode=0,stdout='{"enabled":false,"transport":{}}',stderr='')
+            with self.assertRaises(RuntimeError):
+                migrate(plan,lambda *a,**k: disabled)
+            old=dict(command='old',args=[],env={})
+            replies=[SimpleNamespace(returncode=0,stdout=__import__('json').dumps({'transport':old}),stderr=''),
+                     SimpleNamespace(returncode=0,stdout='',stderr=''),
+                     SimpleNamespace(returncode=0,stdout='',stderr=''),
+                     SimpleNamespace(returncode=0,stdout=__import__('json').dumps({'transport':old}),stderr='')]
+            with self.assertRaises(RuntimeError):
+                migrate(plan,lambda *a,**k: replies.pop(0))
+
+    def test_workbuddy_file_migration_preserves_type_and_environment(self):
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            cli=root/'client.exe';cli.touch()
+            config=root/'mcp.json'
+            config.write_text(__import__('json').dumps({'mcpServers': {'kpro-alerts': {
+                'type':'stdio','command':'old-python','args':['old.py'],
+                'env':{'KPRO_ALERT_DATABASE':'old.db'},'disabled':False}}}))
+            plan=make_plan('workbuddy',client_command=[str(cli)],workbuddy_config=str(root))
+            result=migrate(plan)
+            observed=__import__('json').loads(config.read_text())['mcpServers']['kpro-alerts']
+            self.assertEqual(result['registration'],'migrated')
+            self.assertEqual(observed['type'],'stdio')
+            self.assertEqual(observed['env'],{'KPRO_ALERT_DATABASE':'old.db'})
+            self.assertTrue(list(root.glob('mcp.json.falconpro-*.bak')))
 
 
 if __name__=='__main__': unittest.main()

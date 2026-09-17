@@ -26,6 +26,7 @@ def main():
     setup.add_argument('--device-id')
     setup.add_argument('--operations-database')
     setup.add_argument('--apply',action='store_true')
+    setup.add_argument('--update',action='store_true', help='Explicitly migrate an existing kpro-alerts connector')
     for verb in ('install','upgrade'):
         command=commands.add_parser(verb)
         command.add_argument('--device-id',default=os.environ.get('KPRO_ENDPOINT_DEVICE_ID',''))
@@ -106,20 +107,29 @@ def main():
         returncode=subprocess.call([sys.executable,str(SCRIPTS/'install_metrics.py'),*arguments])
         raise SystemExit(returncode)
     if args.command=='setup':
-        from assistant_setup import make_plan,register
+        from assistant_setup import make_plan,register,migrate,backup_native_client_configuration
         value=make_plan(args.client,args.database,args.cli,args.base,args.table,
                         collector_health=args.collector_health,endpoint_device_id=args.device_id,
                         operations_database=args.operations_database)
+        if args.update and not args.apply:
+            return {**value, 'state':'migration_requires_apply',
+                    'installsDriver':False, 'automaticRemediation':False}
         if not args.apply:return value
         # Reuse native client interfaces, with a non-destructive Cursor merge.
         import importlib.metadata
         if importlib.metadata.version('mcp')!='1.30.0':raise ValueError('Install the pinned requirements first')
         if args.client=='cursor':
             from cursor_setup import configure
-            return configure(value['server'])
+            return configure(value['server'], upgrade=args.update)
         if args.client=='zcode':
             from zcode_setup import configure
-            return configure(value['server'])
+            return configure(value['server'], upgrade=args.update)
+        if args.update:
+            if args.client not in ('codex','workbuddy'):
+                raise ValueError('Grok migration requires its actual AddMcpServer host tool')
+            backup=backup_native_client_configuration(value)
+            result=migrate(value)
+            return {**result, 'backupCreated':True, 'backupPath':str(backup)}
         return register(value)
     from lifecycle import plan,read_json,apply
     if args.resume and args.rollback:raise ValueError('Choose either resume or rollback')

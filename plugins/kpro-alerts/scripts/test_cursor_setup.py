@@ -50,6 +50,17 @@ class CursorTests(unittest.TestCase):
             configure(SERVER, **self.kw)
         self.assertEqual(lock.read_text(), '1234')
 
+    def test_explicit_upgrade_preserves_environment(self):
+        old = {**SERVER, 'command': 'old-python', 'env': {'KPRO_FEISHU_BASE': 'base'}}
+        self.path.write_text(json.dumps({'mcpServers': {'kpro-alerts': old}}))
+        with self.assertRaises(ValueError):
+            configure(SERVER, **self.kw)
+        result = configure(SERVER, upgrade=True, **self.kw)
+        current = json.loads(self.path.read_text())['mcpServers']['kpro-alerts']
+        self.assertEqual(result['registration'], 'migrated')
+        self.assertEqual(current['env'], old['env'])
+        self.assertTrue(result['preservedExistingEnvironment'])
+
 
 if __name__ == '__main__':
     unittest.main()

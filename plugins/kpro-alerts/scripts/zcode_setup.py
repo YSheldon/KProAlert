@@ -39,7 +39,7 @@ def _same(actual, server):
             and actual.get('disabled') is not True)
 
 
-def configure(server, *, user_root=None, project_root=None):
+def configure(server, *, user_root=None, project_root=None, upgrade=False):
     user = Path(user_root) if user_root else Path.home()
     project = Path(project_root or Path.cwd())
     native, _ = _read(project / '.zcode/config.json')
@@ -67,9 +67,18 @@ def configure(server, *, user_root=None, project_root=None):
         fallback_servers = _servers(fallback, False)
         effective = servers or fallback_servers
         if 'kpro-alerts' in effective:
-            if not _same(effective['kpro-alerts'], server):
+            actual = effective['kpro-alerts']
+            if _same(actual, server):
+                return dict(registration='unchanged', scope='user', clientRuntimeVerified=False)
+            if not upgrade or actual.get('enable') is False or actual.get('disabled') is True:
                 raise ValueError('Existing FalconPro connector differs or is disabled')
-            return dict(registration='unchanged', scope='user', clientRuntimeVerified=False)
+            old_env = actual.get('env', {})
+            if not isinstance(old_env, dict) or not all(isinstance(k,str) and isinstance(v,str) for k,v in old_env.items()):
+                raise ValueError('Existing FalconPro connector environment is invalid')
+            server = {**server, 'env':dict(old_env)}
+            registration = 'migrated'
+        else:
+            registration = 'configured'
         if not servers and fallback_servers:
             raise ValueError('Import existing .agents servers in ZCode before creating native settings')
         value['mcp'] = {**value.get('mcp', {}), 'servers': {**servers, 'kpro-alerts': server}}
@@ -87,8 +96,9 @@ def configure(server, *, user_root=None, project_root=None):
         os.replace(temporary, target)
         if not _same(_servers(_read(target)[0], True)['kpro-alerts'], server):
             raise ValueError('ZCode configuration readback failed')
-        return dict(registration='configured', scope='user', clientRuntimeVerified=False,
-                    protectionInstalled=False, preservedExistingServers=True)
+        return dict(registration=registration, scope='user', clientRuntimeVerified=False,
+                    protectionInstalled=False, preservedExistingServers=True,
+                    preservedExistingEnvironment=registration == 'migrated')
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
