@@ -40,9 +40,18 @@ class DownloadTests(unittest.TestCase):
             with zipfile.ZipFile(output, 'w') as z:
                 for name, data in files.items(): z.writestr(name, data)
             return output.getvalue()
-        package_names = {'KProSvcArm.exe','KProProtectArm.dll','KProFilterArm.sys',
-                         'DrvCfg2.dat','default-policy.hex','release-manifest.json','release-attestation.ps1'}
-        package = {name: b'fixture' for name in package_names}
+        payload_names = {'KProSvcArm.exe','KProProtectArm.dll','KProFilterArm.sys',
+                         'DrvCfg2.dat','default-policy.hex'}
+        package = {name: b'fixture' for name in payload_names}
+        files = [dict(name=name, size=7, sha256=hashlib.sha256(b'fixture').hexdigest())
+                 for name in payload_names]
+        package['release-manifest.json'] = json.dumps(dict(
+            schema='KProAlertRelease/v1', version='1.2.0.300', architecture='arm64',
+            platform='windows11-arm64', releaseStatus='verified', files=files,
+            gates=dict(serviceF1ArtifactProduct=True, driverMicrosoftProduct=True,
+                       dllProduct=True, policySignature=True, endToEnd=True,
+                       privateRawEventSpool=True))).encode()
+        package['release-attestation.ps1'] = b'fixture'
         onboarding = {name: b'fixture' for name in LIFECYCLE_ONBOARDING}
         arm = descriptor()
         arm['platform'] = 'windows11-arm64'

@@ -13,7 +13,7 @@ from build_onboarding_manifest import build, NAMES
 from lifecycle import read_json, verify_entry, validate_sources
 from release_download import PACKAGE_METADATA, LIFECYCLE_ONBOARDING, validate_descriptor
 from release_manifest import validate
-from release_platforms import layout, required_files
+from release_platforms import layout, required_files, certificate_only_files
 
 
 def digest(path):
@@ -46,7 +46,8 @@ def assemble(package,sources,destination,tag):
     destination.mkdir(exist_ok=False)
     package_zip=destination/target['archive']
     source_zip=destination/'FalconPro-Onboarding.zip'
-    archive(package,required_files(architecture)|PACKAGE_METADATA,package_zip)
+    package_files = required_files(architecture, manifest.get('serviceProtection')) | PACKAGE_METADATA
+    archive(package,package_files,package_zip)
     archive(sources,LIFECYCLE_ONBOARDING,source_zip,{'onboarding-source.json':source_manifest})
     prefix='https://github.com/YSheldon/KProAlert/releases/download/'+tag+'/'
     assets={}
@@ -73,13 +74,13 @@ def verify_bundle(destination,architecture='x64'):
     if descriptor['platform']!=target['platform']:raise ValueError('Bundle architecture mismatch')
     # Explicitly validate extracted bytes and the signed source manifest before publication.
     with tempfile.TemporaryDirectory(prefix='FalconPro-publish-check-') as folder:
-        for kind,names,filename in (('package',required_files(architecture)|PACKAGE_METADATA,target['archive']),
+        for kind,names,filename in (('package',required_files(architecture)|certificate_only_files(architecture)|PACKAGE_METADATA,target['archive']),
                                    ('onboarding',LIFECYCLE_ONBOARDING,'FalconPro-Onboarding.zip')):
             asset=descriptor['assets'][kind]
             path=root/filename
             if not asset['url'].endswith('/'+filename) or path.stat().st_size!=asset['size'] or digest(path)!=asset['sha256']:
                 raise ValueError('Signed descriptor does not bind final archives')
-            unpack(path,Path(folder)/kind,names)
+            unpack(path,Path(folder)/kind,names,exact=(kind!='package'))
         package=Path(folder)/'package'
         if digest(package/'release-manifest.json')!=descriptor['packageManifestSha256']:raise ValueError('Manifest differs')
         validate(read_json(package/'release-manifest.json'),package,architecture)

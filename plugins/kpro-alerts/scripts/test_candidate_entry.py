@@ -50,12 +50,46 @@ class CandidateEntryTests(unittest.TestCase):
             (package/'DrvCfg2.dat').write_bytes(b'changed')
             with self.assertRaises(ValueError):builder.build(root,[package],'a'*64,'b'*32,'x64','install')
 
+    def test_certificate_only_target_binds_eight_files_and_base_previous(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);target,manifest=self.fixture(root)
+            extras=('FalconPplBootstrap.exe','FalconElamControl.dll','FalconElam.sys')
+            for name in extras:
+                (target/name).write_bytes(b'fixture')
+                manifest['files'].append(dict(name=name,sha256=builder.digest(b'fixture'),size=7))
+            manifest['serviceProtection']='certificate-only'
+            (target/'release-manifest.json').write_text(json.dumps(manifest))
+            previous=root/'previous';previous.mkdir()
+            files=[]
+            for name in ('KProSvc.exe','KProProtect.dll','KProFilter.sys','DrvCfg2.dat','default-policy.hex'):
+                (previous/name).write_bytes(b'fixture')
+                files.append(dict(name=name,sha256=builder.digest(b'fixture'),size=7))
+            old=dict(schema='KProAlertRelease/v1',platform='windows11-x64',architecture='x64',releaseStatus='verified',
+                     files=files,gates=dict(serviceF1ArtifactProduct=True,driverMicrosoftProduct=True,dllProduct=True,
+                     policySignature=True,endToEnd=True,privateRawEventSpool=True))
+            (previous/'release-manifest.json').write_text(json.dumps(old))
+            (previous/'release-attestation.ps1').write_bytes(b'previous attestation')
+            source,raw=builder.build(root,[target,previous],'a'*64,'b'*32,'x64','upgrade')
+            permit=json.loads(base64.b64decode(raw.decode().split('FALCONPRO-CANDIDATE-JSON: ')[1]))
+            self.assertEqual(len(permit['packages']),2)
+            self.assertEqual(len(permit['packages'][0]['files']),8)
+            self.assertEqual(len(permit['packages'][1]['files']),5)
+            (target/'FalconElam.sys').unlink()
+            with self.assertRaises(ValueError):builder.build(root,[target,previous],'a'*64,'b'*32,'x64','upgrade')
+
     def test_no_unsigned_policy_gate_exception(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);package,manifest=self.fixture(root)
             manifest['gates']['policySignature']=False
             (package/'release-manifest.json').write_text(json.dumps(manifest))
             with self.assertRaises(ValueError):builder.build(root,[package],'a'*64,'b'*32,'x64','install')
+
+    def test_missing_attestation_is_a_candidate_error(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);package,_=self.fixture(root)
+            (package/'release-attestation.ps1').unlink()
+            with self.assertRaisesRegex(ValueError, 'Candidate attestation missing'):
+                builder.build(root,[package],'a'*64,'b'*32,'x64','install')
 
     def test_native_entry_explicit_and_results_separate(self):
         entry=(ROOT/'Invoke-FalconProCandidateValidation.ps1').read_text()

@@ -8,6 +8,11 @@ LAYOUTS = {
                   descriptor='FalconPro-release-arm64.ps1', archive='FalconPro-Windows11-arm64.zip'),
 }
 
+CERTIFICATE_ONLY = {
+    'x64': {'FalconPplBootstrap.exe', 'FalconElamControl.dll', 'FalconElam.sys'},
+    'arm64': {'FalconPplBootstrapArm.exe', 'FalconElamControlArm.dll', 'FalconElamArm.sys'},
+}
+
 
 def layout(architecture):
     if not isinstance(architecture, str) or architecture not in LAYOUTS:
@@ -22,6 +27,16 @@ def architecture_for(platform):
     raise ValueError('Unsupported release platform')
 
 
-def required_files(architecture):
+def certificate_only_files(architecture):
+    layout(architecture)
+    return set(CERTIFICATE_ONLY[architecture])
+
+
+def required_files(architecture, service_protection=None):
     value = layout(architecture)
-    return {value['service'], value['dll'], value['driver'], 'DrvCfg2.dat', 'default-policy.hex'}
+    files = {value['service'], value['dll'], value['driver'], 'DrvCfg2.dat', 'default-policy.hex'}
+    if service_protection is None:
+        return files
+    if service_protection != 'certificate-only':
+        raise ValueError('Unsupported service protection mode')
+    return files | certificate_only_files(architecture)
