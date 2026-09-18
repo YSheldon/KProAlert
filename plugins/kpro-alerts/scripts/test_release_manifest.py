@@ -56,6 +56,29 @@ class ManifestTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate(manifest, root, 'x64')
 
+    def test_certificate_only_requires_exact_extra_x64_resources(self):
+        from release_manifest import GATES
+        names = ('KProSvc.exe', 'KProProtect.dll', 'KProFilter.sys', 'DrvCfg2.dat',
+                 'default-policy.hex', 'FalconPplBootstrap.exe',
+                 'FalconElamControl.dll', 'FalconElam.sys')
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            files = []
+            for name in names:
+                (root/name).write_bytes(b'fixture')
+                files.append(dict(name=name, size=7, sha256=hashlib.sha256(b'fixture').hexdigest()))
+            manifest = dict(schema='KProAlertRelease/v1', architecture='x64', platform='windows11-x64',
+                            version='1.2.0.300', releaseStatus='verified', serviceProtection='certificate-only',
+                            files=files, gates={key: True for key in GATES})
+            self.assertEqual(validate(manifest, root, 'x64')['fileCount'], 8)
+            manifest['files'].pop()
+            with self.assertRaises(ValueError):
+                validate(manifest, root, 'x64')
+            manifest['files'].append(dict(name='unexpected.exe', size=7, sha256=hashlib.sha256(b'fixture').hexdigest()))
+            (root/'unexpected.exe').write_bytes(b'fixture')
+            with self.assertRaises(ValueError):
+                validate(manifest, root, 'x64')
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -89,9 +89,9 @@ function Assert-KProReleaseAttestation {
 function Get-KProPackageLayout {
     param([Parameter(Mandatory)][ValidateSet('x64','arm64')][string]$Architecture)
     if ($Architecture -eq 'arm64') {
-        return @{Platform='windows11-arm64';Service='KProSvcArm.exe';Dll='KProProtectArm.dll';Driver='KProFilterArm.sys';Machine=0xaa64}
+        return @{Platform='windows11-arm64';Service='KProSvcArm.exe';Dll='KProProtectArm.dll';Driver='KProFilterArm.sys';Machine=0xaa64;CertificateOnly=@('FalconPplBootstrapArm.exe','FalconElamControlArm.dll','FalconElamArm.sys')}
     }
-    return @{Platform='windows11-x64';Service='KProSvc.exe';Dll='KProProtect.dll';Driver='KProFilter.sys';Machine=0x8664}
+    return @{Platform='windows11-x64';Service='KProSvc.exe';Dll='KProProtect.dll';Driver='KProFilter.sys';Machine=0x8664;CertificateOnly=@('FalconPplBootstrap.exe','FalconElamControl.dll','FalconElam.sys')}
 }
 
 function Assert-KProPeArchitecture {
@@ -193,6 +193,11 @@ function Assert-KProCandidatePackage {
     }
     $layout=Get-KProPackageLayout $Permit.architecture
     $names=@($layout.Service,$layout.Dll,$layout.Driver,'DrvCfg2.dat','default-policy.hex')
+    if($Manifest.serviceProtection -ceq 'certificate-only') {
+        $names+=@($layout.CertificateOnly)
+    } elseif($null -ne $Manifest.serviceProtection) {
+        throw 'Candidate service protection mode rejected.'
+    }
     foreach($list in @(@{files=$bound[0].files},@{files=$Manifest.files})) {
         if(@($list.files).Count -ne $names.Count){throw 'Candidate file count mismatch.'}
         $seen=@{}

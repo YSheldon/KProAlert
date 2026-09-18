@@ -10,6 +10,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'plugins/kpro-alerts/scripts'))
 from build_onboarding_manifest import NAMES
+from release_platforms import required_files
 
 
 def digest(data):
@@ -42,18 +43,23 @@ def build(source_root, package_roots, device, transaction, architecture, operati
             expected = not (status == 'candidate' and gate == 'endToEnd')
             if manifest['gates'].get(gate) is not expected:
                 raise ValueError('Signature/evidence gate incomplete')
-        suffix = 'Arm' if architecture == 'arm64' else ''
-        required = {f'KProSvc{suffix}.exe', f'KProProtect{suffix}.dll', f'KProFilter{suffix}.sys', 'DrvCfg2.dat', 'default-policy.hex'}
-        if len(manifest['files']) != 5 or {f['name'] for f in manifest['files']} != required:
+        required = required_files(architecture, manifest.get('serviceProtection'))
+        if len(manifest['files']) != len(required) or {f['name'] for f in manifest['files']} != required:
             raise ValueError('Incomplete candidate files')
         for file in manifest['files']:
             if Path(file['name']).name != file['name'] or '/' in file['name'] or '\\' in file['name']:
                 raise ValueError('Non-flat candidate filename')
-            data = (root / file['name']).read_bytes()
+            path = root / file['name']
+            if not path.is_file() or path.is_symlink():
+                raise ValueError('Candidate file missing')
+            data = path.read_bytes()
             if type(file['size']) is not int or not 0 < file['size'] <= 67108864 or len(data) != file['size'] or digest(data) != file['sha256']:
                 raise ValueError('Candidate file drift')
+        attestation = root / 'release-attestation.ps1'
+        if not attestation.is_file() or attestation.is_symlink():
+            raise ValueError('Candidate attestation missing')
         packages.append({'manifestSha256': digest(raw),
-                         'attestationSha256': digest((root / 'release-attestation.ps1').read_bytes()),
+                         'attestationSha256': digest(attestation.read_bytes()),
                          'files': manifest['files']})
     now = datetime.now(timezone.utc)
     permit = dict(schema='FalconProCandidatePermit/v1', deviceId=device, transactionId=transaction,

@@ -13,7 +13,7 @@ def validate(manifest, root, architecture):
     if manifest.get('schema') != 'KProAlertRelease/v1' or manifest.get('releaseStatus') != 'verified':
         raise ValueError('unverified release manifest')
     target = layout(architecture)
-    required = required_files(architecture)
+    required = required_files(architecture, manifest.get('serviceProtection'))
     if manifest.get('architecture') != architecture or manifest.get('platform') != target['platform']:
         raise ValueError('package architecture mismatch')
     if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:\.[0-9]+)?', str(manifest.get('version'))):

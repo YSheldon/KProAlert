@@ -9,7 +9,8 @@ import urllib.request
 import zipfile
 import os
 from spool import checked
-from release_platforms import architecture_for, layout, required_files
+from release_platforms import architecture_for, layout, required_files, certificate_only_files
+from release_manifest import validate as validate_manifest
 
 
 API='https://api.github.com/repos/YSheldon/KProAlert/releases/latest'
@@ -90,7 +91,7 @@ def read_url(url,maximum):
     return data
 
 
-def unpack(archive,target,allowed):
+def unpack(archive,target,allowed, *, exact=True):
     if elevated():raise ValueError('Acquire/extract as a normal user, never with administrator/root privileges')
     target=Path(target)
     checked(target.parent)
@@ -112,7 +113,7 @@ def unpack(archive,target,allowed):
             names.add(name.casefold());total+=entry.file_size
             if not 0<entry.file_size<=64*1024*1024 or total>256*1024*1024:
                 raise ValueError('Expanded archive exceeds budget')
-        if names!={n.casefold() for n in allowed}:raise ValueError('Archive member set incomplete')
+        if exact and names!={n.casefold() for n in allowed}:raise ValueError('Archive member set incomplete')
         target.mkdir(parents=False)
         for entry in entries:
             if entry.is_dir():continue
@@ -155,7 +156,8 @@ def acquire(destination,verify_descriptor,*,fetch=read_url,platform='windows11-x
             not urlsplit(a['url']).path.startswith(expected_prefix) for a in verified['assets'].values()):
         raise ValueError('Descriptor/assets do not belong to the discovered release tag')
     destination.mkdir(parents=False)
-    for kind,allowed in (('package',required_files(architecture)|PACKAGE_METADATA),('onboarding',ONBOARDING)):
+    package_allowed = required_files(architecture) | certificate_only_files(architecture) | PACKAGE_METADATA
+    for kind,allowed in (('package',package_allowed),('onboarding',ONBOARDING)):
         asset=verified['assets'][kind]
         payload=fetch(asset['url'],asset['size'])
         if len(payload)!=asset['size'] or hashlib.sha256(payload).hexdigest()!=asset['sha256']:
@@ -166,10 +168,12 @@ def acquire(destination,verify_descriptor,*,fetch=read_url,platform='windows11-x
             with zipfile.ZipFile(archive) as z:
                 if 'Invoke-FalconProLifecycle.ps1' in z.namelist():
                     allowed=LIFECYCLE_ONBOARDING
-        unpack(archive,destination/kind,allowed)
+        unpack(archive,destination/kind,allowed,exact=(kind!='package'))
     for kind,name,key in (('package','release-manifest.json','packageManifestSha256'),
                           ('onboarding','onboarding-source.json','sourceManifestSha256')):
         if hashlib.sha256((destination/kind/name).read_bytes()).hexdigest()!=verified[key]:
             raise ValueError('Downloaded manifest differs from signed descriptor')
+    manifest = json.loads((destination/'package'/'release-manifest.json').read_text(encoding='utf-8-sig'))
+    validate_manifest(manifest, destination/'package', architecture)
     with (destination/'FalconPro-release.ps1').open('xb') as f:f.write(data)
     return verified
