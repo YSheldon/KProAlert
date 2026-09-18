@@ -439,7 +439,7 @@ try {
         if((Digest $data) -cne $entry.sha256){throw 'Source hash mismatch.'}
         $sources[$entry.name]=$data
     }
-    if((Digest $sources['tools/KProReleaseTrust.psm1']) -cne 'e425929f633ce478e9459a794abdcae4098dc200cda8c1d1d872a45feb05a27a'){throw 'Native trust module mismatch.'}
+    if((Digest $sources['tools/KProReleaseTrust.psm1']) -cne 'd106f5681c7041f68478163f8d7f324d226530e3052b3e68cc58d88758fd786f'){throw 'Native trust module mismatch.'}
     Import-Module (Join-Path $PSScriptRoot 'tools/KProReleaseTrust.psm1') -Force
     Assert-KProProgramFilesRoot $nativeProgramFiles
     if($candidateValidation) {

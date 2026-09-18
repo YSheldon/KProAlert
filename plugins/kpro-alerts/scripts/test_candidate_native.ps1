@@ -9,6 +9,15 @@ $permit=[pscustomobject]@{schema='FalconProCandidatePermit/v1';deviceId=$device;
 $manifest=[pscustomobject]@{releaseStatus='candidate';gates=[pscustomobject]@{serviceF1ArtifactProduct=$true;driverMicrosoftProduct=$true;dllProduct=$true;policySignature=$true;endToEnd=$false;privateRawEventSpool=$true};files=$files}
 Assert-KProCandidatePermitFacts $permit $device $transaction 'x64' $source 'install'
 Assert-KProCandidatePackage $permit $manifest $hash ('f'*64)
+$certificateFiles=@($files + @(
+    [pscustomobject]@{name='FalconPplBootstrap.exe';sha256='e'*64;size=123},
+    [pscustomobject]@{name='FalconElamControl.dll';sha256='e'*64;size=123},
+    [pscustomobject]@{name='FalconElam.sys';sha256='e'*64;size=123}
+))
+$certificatePackage=[pscustomobject]@{manifestSha256=$hash;attestationSha256='f'*64;files=$certificateFiles}
+$certificatePermit=[pscustomobject]@{schema=$permit.schema;deviceId=$device;transactionId=$transaction;architecture='x64';operation='install';sourceManifestSha256=$source;issuedUtc=$permit.issuedUtc;expiresUtc=$permit.expiresUtc;packages=@($certificatePackage)}
+$certificateManifest=[pscustomobject]@{releaseStatus='candidate';serviceProtection='certificate-only';gates=$manifest.gates;files=$certificateFiles}
+Assert-KProCandidatePackage $certificatePermit $certificateManifest $hash ('f'*64)
 Denied {Assert-KProCandidatePermitFacts $permit ('0'*64) $transaction 'x64' $source 'install'}
 Denied {Assert-KProCandidatePermitFacts $permit $device ('0'*32) 'x64' $source 'install'}
 Denied {Assert-KProCandidatePermitFacts $permit $device $transaction 'arm64' $source 'install'}

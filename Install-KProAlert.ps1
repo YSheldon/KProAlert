@@ -156,7 +156,7 @@ $attestationBytes = Read-LockedInput $attestationPath 65536
 $trustModule=Join-Path $PSScriptRoot 'tools/KProReleaseTrust.psm1'
 Assert-PlainPath $trustModule
 $null=Read-LockedInput $trustModule 1048576
-if ((Get-FileHash -LiteralPath $trustModule).Hash -ine 'e425929f633ce478e9459a794abdcae4098dc200cda8c1d1d872a45feb05a27a') { throw 'Native trust module mismatch.' }
+if ((Get-FileHash -LiteralPath $trustModule).Hash -ine 'd106f5681c7041f68478163f8d7f324d226530e3052b3e68cc58d88758fd786f') { throw 'Native trust module mismatch.' }
 Import-Module $trustModule -Force
 $attestationIdentity = Assert-KProReleaseAttestation -Bytes $attestationBytes
 $attestationText = ConvertFrom-KProAttestationText -Bytes $attestationBytes

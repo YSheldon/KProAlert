@@ -112,7 +112,7 @@ class NativeReceiptReaderTests(unittest.TestCase):
         @contextmanager
         def guard(path,digest):
             self.assertEqual(Path(path).name,'KProReleaseTrust.psm1')
-            self.assertEqual(digest,'e425929f633ce478e9459a794abdcae4098dc200cda8c1d1d872a45feb05a27a')
+            self.assertEqual(digest,'d106f5681c7041f68478163f8d7f324d226530e3052b3e68cc58d88758fd786f')
             events.append('pin')
             yield
             events.append('unpin')

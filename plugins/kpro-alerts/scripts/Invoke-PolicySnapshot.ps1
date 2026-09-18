@@ -130,7 +130,7 @@ try {
     $module=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../../tools/KProReleaseTrust.psm1'))
     $moduleBytes=Read-Locked $module 65536
     # Bound helper dependency; updating it requires a new reviewed/signed helper.
-    if((Get-Digest $moduleBytes) -cne 'e425929f633ce478e9459a794abdcae4098dc200cda8c1d1d872a45feb05a27a') {
+    if((Get-Digest $moduleBytes) -cne 'd106f5681c7041f68478163f8d7f324d226530e3052b3e68cc58d88758fd786f') {
         throw 'Native trust module mismatch.'
     }
     Import-Module $module -Force

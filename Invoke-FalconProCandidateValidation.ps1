@@ -26,7 +26,7 @@ try {
         if($item -is [IO.FileInfo]){$item=$item.Directory}else{$item=$item.Parent}
     }
     $stream=[IO.File]::Open($module,'Open','Read','Read');$held.Add($stream)
-    if((Get-FileHash -LiteralPath $module).Hash -ine 'e425929f633ce478e9459a794abdcae4098dc200cda8c1d1d872a45feb05a27a'){throw 'Native trust module mismatch.'}
+    if((Get-FileHash -LiteralPath $module).Hash -ine 'd106f5681c7041f68478163f8d7f324d226530e3052b3e68cc58d88758fd786f'){throw 'Native trust module mismatch.'}
     Import-Module $module -Force
     $permit=Get-KProCandidatePermit $CandidatePermitPath $CandidatePermitSha256 $ExpectedDeviceId $TransactionId $ExpectedArchitecture $SourceManifestSha256 $Mode $PSScriptRoot $held
     if($permit.packages[0].manifestSha256 -cne $ManifestSha256){throw 'Candidate target mismatch.'}
