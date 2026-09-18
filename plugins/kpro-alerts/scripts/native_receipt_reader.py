@@ -9,7 +9,7 @@ import subprocess
 from windows_tools import native_tool
 
 NAMES={'falconprosetup.exe','falconprosetup32.exe','falconprosetuparm.exe'}
-TRUST_SHA256='979c2d8cfd7e19317ae8e5752bad59f6431ac92d69777b5661b27ed7e1dd2639'
+TRUST_SHA256='e425929f633ce478e9459a794abdcae4098dc200cda8c1d1d872a45feb05a27a'
 
 
 def _request(entry,entry_sha256,device,transaction):
