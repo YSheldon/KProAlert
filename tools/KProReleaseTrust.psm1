@@ -193,9 +193,11 @@ function Assert-KProCandidatePackage {
     }
     $layout=Get-KProPackageLayout $Permit.architecture
     $names=@($layout.Service,$layout.Dll,$layout.Driver,'DrvCfg2.dat','default-policy.hex')
-    if($Manifest.serviceProtection -ceq 'certificate-only') {
+    $protectionProperty=$Manifest.PSObject.Properties['serviceProtection']
+    $serviceProtection=if($null -eq $protectionProperty){$null}else{[string]$protectionProperty.Value}
+    if($serviceProtection -ceq 'certificate-only') {
         $names+=@($layout.CertificateOnly)
-    } elseif($null -ne $Manifest.serviceProtection) {
+    } elseif($null -ne $serviceProtection) {
         throw 'Candidate service protection mode rejected.'
     }
     foreach($list in @(@{files=$bound[0].files},@{files=$Manifest.files})) {

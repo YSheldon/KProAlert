@@ -28,7 +28,7 @@ $moduleBytes = Read-LockedInput $module 1048576
 $sha = [Security.Cryptography.SHA256]::Create()
 try { $moduleHash = ([BitConverter]::ToString($sha.ComputeHash($moduleBytes))).Replace('-','') }
 finally { $sha.Dispose() }
-if ($moduleHash -ine '979c2d8cfd7e19317ae8e5752bad59f6431ac92d69777b5661b27ed7e1dd2639') { throw 'Native trust module mismatch.' }
+if ($moduleHash -ine 'd106f5681c7041f68478163f8d7f324d226530e3052b3e68cc58d88758fd786f') { throw 'Native trust module mismatch.' }
 Import-Module $module -Force
 $nativeProgramFiles=Get-KProNativeProgramFiles
 Assert-KProProgramFilesRoot $nativeProgramFiles

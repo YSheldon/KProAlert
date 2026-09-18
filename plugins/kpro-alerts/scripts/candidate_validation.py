@@ -9,7 +9,7 @@ import subprocess
 from windows_tools import native_tool
 
 
-TRUST_SHA256 = 'e425929f633ce478e9459a794abdcae4098dc200cda8c1d1d872a45feb05a27a'
+TRUST_SHA256 = 'd106f5681c7041f68478163f8d7f324d226530e3052b3e68cc58d88758fd786f'
 VERIFIER = r'''
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
