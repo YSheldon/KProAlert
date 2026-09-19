@@ -18,6 +18,26 @@ $certificatePackage=[pscustomobject]@{manifestSha256=$hash;attestationSha256='f'
 $certificatePermit=[pscustomobject]@{schema=$permit.schema;deviceId=$device;transactionId=$transaction;architecture='x64';operation='install';sourceManifestSha256=$source;issuedUtc=$permit.issuedUtc;expiresUtc=$permit.expiresUtc;packages=@($certificatePackage)}
 $certificateManifest=[pscustomobject]@{releaseStatus='candidate';serviceProtection='certificate-only';gates=$manifest.gates;files=$certificateFiles}
 Assert-KProCandidatePackage $certificatePermit $certificateManifest $hash ('f'*64)
+foreach($relativePath in @('Invoke-FalconProLifecycle.ps1','plugins/kpro-alerts/scripts/Invoke-PolicySnapshot.ps1')) {
+    $sourceText=[IO.File]::ReadAllText((Join-Path $root $relativePath))
+    $start=$sourceText.IndexOf('    $names=@($layout.Service')
+    $end=$sourceText.IndexOf('    $seen=@{}',$start)
+    if($start -lt 0 -or $end -le $start){throw 'Package validation block missing.'}
+    $validateLayout=[scriptblock]::Create($sourceText.Substring($start,$end-$start))
+    foreach($architecture in @('x64','arm64')) {
+        $layout=Get-KProPackageLayout $architecture
+        $baseNames=@($layout.Service,$layout.Dll,$layout.Driver,'DrvCfg2.dat','default-policy.hex')
+        $manifest=[pscustomobject]@{files=@($baseNames|ForEach-Object{[pscustomobject]@{name=$_}})}
+        & $validateLayout
+        $manifest|Add-Member serviceProtection 'certificate-only'
+        Denied {& $validateLayout}
+        $manifest.files=@(($baseNames+@($layout.CertificateOnly))|ForEach-Object{[pscustomobject]@{name=$_}})
+        & $validateLayout
+        $manifest.serviceProtection='unknown'
+        Denied {& $validateLayout}
+    }
+}
+$manifest=[pscustomobject]@{releaseStatus='candidate';gates=$certificateManifest.gates;files=$files}
 Denied {Assert-KProCandidatePermitFacts $permit ('0'*64) $transaction 'x64' $source 'install'}
 Denied {Assert-KProCandidatePermitFacts $permit $device ('0'*32) 'x64' $source 'install'}
 Denied {Assert-KProCandidatePermitFacts $permit $device $transaction 'arm64' $source 'install'}

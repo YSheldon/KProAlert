@@ -125,6 +125,11 @@ function Read-Package([string]$Root,[string]$Expected) {
         if($manifest.gates.$gate -isnot [bool] -or -not $manifest.gates.$gate){throw 'Release evidence incomplete.'}
     }
     $names=@($layout.Service,$layout.Dll,$layout.Driver,'DrvCfg2.dat','default-policy.hex')
+    $protectionProperty=$manifest.PSObject.Properties['serviceProtection']
+    if($null -ne $protectionProperty -and $null -ne $protectionProperty.Value) {
+        if($protectionProperty.Value -cne 'certificate-only'){throw 'Package service protection mode rejected.'}
+        $names+=@($layout.CertificateOnly)
+    }
     if(@($manifest.files).Count -ne $names.Count){throw 'Package count mismatch.'}
     $seen=@{}
     foreach($entry in $manifest.files) {
