@@ -7,14 +7,15 @@ guidance, historical script helpers and links to signed executable assets.
 
 ## Current Release Boundary
 
-Signed installer preview:
-https://github.com/YSheldon/KProAlert/releases/tag/v0.3.0-native-preview.2
+Published signed installers (the historical tag is retained):
+https://github.com/YSheldon/KProAlert/releases/tag/v0.3.0-native-preview.4
 
 It contains three installers and hash metadata, not a complete production driver
-distribution. Controlled x64 ordinary-service installation, upgrade and reboot
-recovery have been demonstrated. This does not prove all four assistant clients,
-all Windows versions, ARM64 or PPL upgrades. Stable public component publication
-and remaining platform gates must finish before general use.
+distribution. Controlled x64 CertificateOnly PPL upgrade and reboot recovery
+passed with the ACL repair; Win7 x86 entry loading and platform detection passed.
+ARM64 runtime and HLK acceptance are deferred until its environment is available.
+This does not prove full x86 lifecycle, all assistant clients or all Windows
+versions. Complete signed runtime catalog/package publication remains pending.
 
 The ordinary native entry queries
 `https://api.github.com/repos/YSheldon/KProAlert/releases/latest` and requires a
