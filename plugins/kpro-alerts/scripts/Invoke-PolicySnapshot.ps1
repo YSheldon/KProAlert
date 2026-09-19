@@ -159,6 +159,11 @@ try {
         if($manifest.gates.$gate -isnot [bool] -or $manifest.gates.$gate -ne $true){throw 'Installed release gate missing.'}
     }
     $names=@($layout.Service,$layout.Dll,$layout.Driver,'DrvCfg2.dat','default-policy.hex')
+    $protectionProperty=$manifest.PSObject.Properties['serviceProtection']
+    if($null -ne $protectionProperty -and $null -ne $protectionProperty.Value) {
+        if($protectionProperty.Value -cne 'certificate-only'){throw 'Package service protection mode rejected.'}
+        $names+=@($layout.CertificateOnly)
+    }
     if(@($manifest.files).Count -ne $names.Count){throw 'Invalid release file count.'}
     $seen=@{}
     foreach($file in $manifest.files) {
