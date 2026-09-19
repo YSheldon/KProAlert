@@ -20,12 +20,19 @@ engine results, not actions performed by the AI.
 `aiActionExecutionAvailable=false`. These are feature capabilities, not evidence
 that a particular endpoint is installed or healthy.
 
-Signed mode switching, the native action broker and extended driver Audit events
-are phase-two work, not first-release blockers. Real data delivery, five-client
+The user subsequently selected `switch_to_enforce` as the first native action
+to implement. This is a one-way, confirmation-required signed-policy transition,
+not permission to switch to Audit or execute arbitrary remediation. Its native
+execution channel is not implemented yet; see [ENFORCE-ACTION.md](ENFORCE-ACTION.md).
+Extended driver Audit events remain deferred and are not required. Real data delivery, five-client
 runtime and notification acceptance, authorized uploads, and applicable existing
 package installation/upgrade gates still apply to the first release.
 
 ## Phase Two Only: Signed Protection Modes
+
+The enforcement action below can use the existing driver. The deferred part is
+extended Audit event coverage and general two-way mode switching, not the signed
+enforcement action's implementation work.
 
 | Profile | decisionMode | PolicyFlags for ransomware-only defaults | Effect |
 | --- | --- | --- | --- |

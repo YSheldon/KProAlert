@@ -11,6 +11,7 @@ import sqlite3
 from notification_journal import SAFE_NUMERIC_FIELDS, SAFE_BOOLEAN_FIELDS
 from query import pseudonym, safe_timestamp
 from spool import checked
+from guidance import EVENT_NAMES
 
 CLIENTS = ('codex', 'grok', 'cursor', 'workbuddy', 'zcode', 'generic')
 VERDICTS = ('benign', 'suspicious', 'malicious', 'unknown')
@@ -21,7 +22,8 @@ ACTIONS = ('investigate', 'switch_to_audit', 'switch_to_enforce', 'terminate_pro
            'quarantine_file', 'delete_file', 'add_exception', 'restore_backup', 'isolate_network')
 MAX_RECORDS = 100000
 V1_CAPABILITIES = dict(releaseScope='existing_driver_events_v1', driverChangeRequired=False,
-                       policyMutationAvailable=False, aiActionExecutionAvailable=False)
+                       policyMutationAvailable=False, aiActionExecutionAvailable=False,
+                       plannedNativeActions=['switch_to_enforce'])
 
 
 def canonical(value):
@@ -184,6 +186,10 @@ def events(path, after=0, limit=100):
         loss = db.execute('SELECT COALESCE(SUM(dropped),0) FROM batches').fetchone()[0]
         return dict(events=[_evidence(row[1:]) for row in page], nextCursor=page[-1][0] if page else after,
                     hasMore=len(rows) > limit, reportedDropped=loss,
+                    eventTypeNames={str(i):name for i,name in enumerate(EVENT_NAMES)},
+                    operationBits={'1':'read','2':'write','4':'execute','8':'rename','16':'delete',
+                                   '32':'truncate','64':'reparse','128':'security','256':'create'},
+                    decisionModes={'1':'audit','2':'notify','3':'block'}, eventModeIsLivePolicyState=False,
                     coverage='retained_engine_events_not_all_file_io', nativeSourceVerified=False)
     finally:
         db.close()

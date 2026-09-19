@@ -31,6 +31,10 @@ class OperationsTests(unittest.TestCase):
         self.assertTrue(first['hasMore'])
         self.assertFalse(second['hasMore'])
         self.assertEqual([x['telemetry']['eventType'] for x in first['events']+second['events']], list(range(9)))
+        self.assertEqual(first.get('eventTypeNames',{}).get('7'),'RansomwareBehaviorDetected')
+        self.assertEqual(first.get('operationBits',{}).get('8'),'rename')
+        self.assertEqual(first.get('operationBits',{}).get('16'),'delete')
+        self.assertIs(first.get('eventModeIsLivePolicyState'),False)
         for secret in ('private-payroll', 'secret argument', 'device-private'):
             self.assertNotIn(secret, json.dumps(first))
 
