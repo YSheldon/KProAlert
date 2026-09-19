@@ -7,17 +7,29 @@ guidance, historical script helpers and links to signed executable assets.
 
 ## Current Release Boundary
 
-Signed installer preview:
+Published signed installers (the historical tag is retained):
+https://github.com/YSheldon/KProAlert/releases/tag/v0.3.0-native-preview.4
+
+It contains three installers and hash metadata, not a complete production driver
+distribution.
+
+The separate runtime preview remains available:
 https://github.com/YSheldon/KProAlert/releases/tag/v0.3.0-runtime-preview.1
 
-It contains three signed installers, a signed native catalog, seven platform
-candidate archives and the original x64 rollback archive. All binary/ZIP assets
-were downloaded through anonymous HTTPS and matched to final hashes; native
-parser readback passed. It is still not a production release. Controlled x64 ordinary-service installation, upgrade and reboot
-recovery have been demonstrated. This does not prove all four assistant clients,
-all Windows versions, ARM64 or PPL upgrades. ARM64 PPL auxiliary materials remain
-missing, so its installer asset does not imply an admitted ARM64 package. Stable public component publication
-and remaining platform gates must finish before general use.
+That preview contains earlier signed installers, a signed native catalog, seven
+platform candidate archives and the original x64 rollback archive. Its binary/ZIP
+assets were downloaded through anonymous HTTPS and matched to final hashes;
+native parser readback passed. It remains a candidate, not a production runtime
+release. Do not mix its hash-bound catalog with the newer installer release.
+
+Controlled x64 CertificateOnly PPL upgrade and reboot recovery
+passed with the ACL repair; Win7 x86 entry loading and platform detection passed.
+ARM64 runtime and HLK acceptance are deferred until its environment is available.
+ARM64 PPL auxiliary materials remain missing, so its installer asset does not
+imply an admitted ARM64 package.
+This does not prove full x86 lifecycle, all assistant clients or all Windows
+versions. A complete admitted production runtime catalog/package release remains
+pending.
 
 The ordinary native entry queries
 `https://api.github.com/repos/YSheldon/KProAlert/releases/latest` and requires a

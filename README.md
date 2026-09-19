@@ -12,10 +12,11 @@ For the user-facing installation workflow, read [START-HERE.md](START-HERE.md).
 The endpoint entry is the signed native EXE workflow in
 [NATIVE-INSTALL.md](NATIVE-INSTALL.md). Connector setup and opt-in statistics
 remain separate utilities; `falconpro.py` is not the default endpoint installer.
-The binary release and automatic notification gates are not complete yet.
-The current public GitHub release is still a controlled validation candidate;
-the lifecycle source is implemented and tested, but it is not a stable GA
-release until complete signed native catalogs/packages and applicable gates pass.
+Signed native installer binaries are published in
+[the installer release](https://github.com/YSheldon/KProAlert/releases/tag/v0.3.0-native-preview.4).
+Complete admitted runtime packages and automatic notification acceptance remain
+pending. ARM64 runtime/HLK acceptance is deferred; a signed Arm binary alone does
+not establish production support.
 
 ## One Address, Two Components
 
@@ -32,9 +33,9 @@ PC; otherwise it can provide instructions and read authorized cloud alerts only.
 
 The intended protection flow is local device confirmation, signed release
 download, one explicit installation approval with normal UAC, native verification,
-then alert connection. No stable installable release has been published yet; the
-current prerelease is a validation candidate and is deliberately rejected by
-ordinary install/upgrade discovery.
+then alert connection. The installer-only release does not yet supply the signed
+runtime catalog and driver/service packages needed by ordinary install/upgrade
+discovery. Do not bypass admission using a developer test permit.
 
 ## Capabilities
 
