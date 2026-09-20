@@ -110,6 +110,11 @@ This section describes unreleased candidate code, not installed release capabili
 The existing driver protocol is unchanged. A new service safe-spool projection
 adds `nativeSources` (private batch SHA-256 and original record index); older
 events without it remain analysis-only. It is a locator, not an attestation.
+Upgrade the collector/connector reader first, restart its actual MCP process and
+verify `integration_status.codeSha256` before deploying this service candidate.
+Older strict safe-batch readers reject the additional envelope field; unchanged
+driver event records do not imply mixed service/collector versions are supported.
+The new reader continues to accept old batches for analysis only.
 
 The local Windows connector uses an admitted signed native entry configured with
 `KPRO_NATIVE_ENTRY`, `KPRO_NATIVE_ENTRY_SHA256` and `KPRO_ENDPOINT_DEVICE_ID`.
