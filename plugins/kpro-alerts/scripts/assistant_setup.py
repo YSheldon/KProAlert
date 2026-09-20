@@ -31,13 +31,14 @@ def discover_client(client):
 
 
 def make_plan(client, database=None, cli=None, base=None, table=None,
-              client_command=None, workbuddy_config=None, collector_health=None, endpoint_device_id=None, operations_database=None):
+              client_command=None, workbuddy_config=None, collector_health=None, endpoint_device_id=None, operations_database=None,
+              native_entry=None,native_entry_sha256=None):
     if client not in ('codex', 'workbuddy', 'cursor', 'grok', 'zcode', 'generic'):
         raise ValueError('Unsupported assistant')
     onboarding_only = not any((database, cli, base, table))
     server = build_config(database, cli, base, table, collector_health, endpoint_device_id,
                           onboarding_only=onboarding_only, operations_database=operations_database,
-                          assistant_client=client)['mcpServers']['kpro-alerts']
+                          assistant_client=client,native_entry=native_entry,native_entry_sha256=native_entry_sha256)['mcpServers']['kpro-alerts']
     command = []
     if client in ('codex', 'workbuddy'):
         command = client_command or discover_client(client)

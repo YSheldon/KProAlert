@@ -25,6 +25,8 @@ def main():
     setup.add_argument('--collector-health')
     setup.add_argument('--device-id')
     setup.add_argument('--operations-database')
+    setup.add_argument('--native-entry')
+    setup.add_argument('--native-entry-sha256')
     setup.add_argument('--apply',action='store_true')
     setup.add_argument('--update',action='store_true', help='Explicitly migrate an existing kpro-alerts connector')
     for verb in ('install','upgrade'):
@@ -110,7 +112,10 @@ def main():
         from assistant_setup import make_plan,register,migrate,backup_native_client_configuration
         value=make_plan(args.client,args.database,args.cli,args.base,args.table,
                         collector_health=args.collector_health,endpoint_device_id=args.device_id,
-                        operations_database=args.operations_database)
+                        operations_database=args.operations_database,native_entry=args.native_entry,
+                        native_entry_sha256=args.native_entry_sha256)
+        if args.update and args.native_entry:
+            raise ValueError('Migration preserves existing environment; export reviewed native configuration separately instead of overwriting it')
         if args.update and not args.apply:
             return {**value, 'state':'migration_requires_apply',
                     'installsDriver':False, 'automaticRemediation':False}

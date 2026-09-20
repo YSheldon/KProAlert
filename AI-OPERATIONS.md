@@ -122,6 +122,16 @@ These values select verified local release material, not commands supplied by
 an event or model. Cloud-hosted assistants cannot execute on the user's PC by
 running this tool in the cloud. No private signing key is distributed.
 
+The shared `falconpro.py setup` command accepts `--native-entry` and
+`--native-entry-sha256` together with `--device-id`, `--database` and
+`--operations-database`. Preview first; configuration is not signature verification
+or approval to execute. Each native call still pins the admitted hash and verifies
+the publisher. No automatic approval is configured. Cloud users must not supply
+another computer's path or device ID. Existing connector migrations preserve
+their environment and reject these new binding arguments rather than silently
+overwriting it; use `setup_config.py --output <new-file>` for a separately reviewed
+configuration export, then the client's normal configuration approval flow.
+
 1. `propose_action` records an unapproved `switch_to_enforce` request.
 2. `request_native_action(request_id)` resolves original private evidence,
    validates device/PPL/signatures/current policy and asks for native human

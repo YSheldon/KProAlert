@@ -6,6 +6,19 @@ from assistant_setup import make_plan, register, migrate, equivalent
 
 
 class AssistantSetupTests(unittest.TestCase):
+    def test_native_binding_is_forwarded_without_approval_or_registration(self):
+        with tempfile.TemporaryDirectory() as d:
+            cli=Path(d)/'client.exe';cli.touch()
+            for client in ('codex','cursor','grok','workbuddy'):
+                plan=make_plan(client,database='events.db',operations_database='ops.db',
+                    endpoint_device_id='a'*64,client_command=[str(cli)],
+                    native_entry=r'C:\FalconProSetup.exe',native_entry_sha256='b'*64)
+                self.assertEqual(plan['server']['env']['KPRO_NATIVE_ENTRY_SHA256'],'b'*64)
+                self.assertEqual(plan['server']['env']['KPRO_ASSISTANT_CLIENT'],client)
+                self.assertFalse(plan['automaticRemediation'])
+                self.assertFalse(plan['installsDriver'])
+            self.assertEqual(list(Path(d).iterdir()),[cli])
+
     def test_first_setup_needs_no_database_or_cloud_credentials(self):
         with tempfile.TemporaryDirectory() as d:
             cli=Path(d)/'client.exe';cli.touch()
