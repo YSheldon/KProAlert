@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+import unittest
 from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -15,8 +16,13 @@ async def main():
             initialized = await session.initialize()
             assert initialized.serverInfo.name == 'FalconPro'
             result = await session.list_tools()
-            assert {t.name for t in result.tools} == {'local_alerts', 'feishu_alerts', 'integration_status', 'alert_guidance', 'collector_status', 'endpoint_status', 'operations_events', 'operations_status', 'assess_event', 'propose_action'}
-            assert all(t.annotations.readOnlyHint == (t.name not in {'assess_event','propose_action'}) for t in result.tools)
+            tools={t.name:t for t in result.tools}
+            assert set(tools) == {'local_alerts', 'feishu_alerts', 'integration_status', 'alert_guidance', 'collector_status', 'endpoint_status', 'operations_events', 'operations_status', 'assess_event', 'propose_action', 'request_native_action', 'native_action_result', 'collect_native_action_result', 'diagnose_native_action'}
+            writes={'assess_event','propose_action','request_native_action','collect_native_action_result'}
+            assert all(t.annotations.readOnlyHint == (t.name not in writes) for t in result.tools)
+            assert tools['request_native_action'].annotations.destructiveHint is True
+            for name in ('native_action_result','diagnose_native_action'):
+                assert tools[name].annotations.destructiveHint is False
             for name in ('local_alerts', 'feishu_alerts'):
                 reply = await session.call_tool(name, {'limit': 1})
                 assert 'not configured' in str(reply)
@@ -24,7 +30,12 @@ async def main():
             assert 'codeSha256' in str(status)
             guidance = await session.call_tool('alert_guidance', {'alert_id': 'a'*64})
             assert 'not configured' in str(guidance)
-    print('PASS: stdio initialize, read-only tools, missing-configuration handling')
+    print('PASS: stdio initialize, exact tool/permission contract, missing-configuration handling')
+
+
+class McpStdioTests(unittest.IsolatedAsyncioTestCase):
+    async def test_complete_stdio_contract(self):
+        await main()
 
 
 if __name__ == '__main__':
