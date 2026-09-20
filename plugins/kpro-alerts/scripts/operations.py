@@ -55,8 +55,11 @@ def _model(value):
 def _validate_evidence(value):
     keys = {'schema','eventId','evidenceSha256','deviceId','sessionId','received','telemetry',
             'privacy','source','sourceAttestation','simulationClaimed','simulated'}
-    if not isinstance(value, dict) or set(value) != keys:
+    if not isinstance(value, dict) or set(value) not in (keys,keys|{'nativeSource'}):
         raise ValueError('Unknown evidence fields')
+    if 'nativeSource' in value:
+        from native_provenance import validate_source
+        validate_source(value['nativeSource'])
     for key in ('eventId','evidenceSha256','deviceId','sessionId'):
         identifier(value[key])
     safe_timestamp(value['received'])
@@ -86,6 +89,25 @@ def decode_record(raw):
     record_id = identifier(value.get('recordId'))
     if digest({k:v for k,v in value.items() if k != 'recordId'}) != record_id:
         raise ValueError('Operations record digest mismatch')
+    if value.get('schema') == 'FalconProNativeActionResult/v1':
+        from native_actions import validate_receipt
+        common={'schema','eventId','evidenceSha256','approvalState','executionState','simulated',
+                'requestKey','recordedAt','client','clientIdentityTrust','recordId'}
+        if set(value)!=common|{'request','nativeReceipt','action','verificationProvenance'}:
+            raise ValueError('Unknown native result fields')
+        request=decode_record(canonical(value['request']))
+        if request['schema']!='FalconProActionRequest/v1' or request['action']!='switch_to_enforce':
+            raise ValueError('Invalid native result request')
+        receipt=value['nativeReceipt']
+        validate_receipt(receipt,request,receipt.get('linkage',{}).get('deviceSha256'))
+        if (any(value[k]!=request[k] for k in ('eventId','evidenceSha256','simulated','action')) or
+            value['approvalState']!='native_receipt_recorded' or value['executionState']!=receipt['outcome'] or
+            value['verificationProvenance']!='verified_locally_not_device_signed' or
+            value['client'] not in CLIENTS or value['clientIdentityTrust']!='configured_not_cryptographically_attested' or
+            not isinstance(value['requestKey'],str) or not re.fullmatch('[a-f0-9]{32}',value['requestKey'])):
+            raise ValueError('Native result binding mismatch')
+        safe_timestamp(value['recordedAt'])
+        return value
     expected = {'FalconProAIDecision/v1':'not_requested',
                 'FalconProActionRequest/v1':'requires_native_confirmation'}
     if (value.get('schema') not in expected or value.get('approvalState') != expected[value['schema']]
@@ -155,12 +177,16 @@ def _evidence(row):
             safe[key] = event[key]
     if type(event.get('operation')) is not int:
         raise ValueError('Operation missing')
+    native={}
+    if '_nativeSource' in event:
+        from native_provenance import validate_source
+        native['nativeSource']=validate_source(event['_nativeSource'])
     return dict(schema='FalconProEventEvidence/v1', eventId=event_id,
                 evidenceSha256=digest(dict(eventId=event_id, device=device, session=session, received=received, event=event)),
                 deviceId=pseudonym(device), sessionId=pseudonym(session), received=safe_timestamp(received),
                 telemetry=safe, privacy='numeric_projection', source='local_event_store',
                 sourceAttestation='not_verified_by_native_broker', simulationClaimed=event.get('simulated') is True,
-                simulated=event.get('simulated') is True and event_id in os.environ.get('KPRO_SIMULATED_ALERT_IDS','').split(','))
+                simulated=event.get('simulated') is True and event_id in os.environ.get('KPRO_SIMULATED_ALERT_IDS','').split(','), **native)
 
 
 def evidence(path, event_id):
@@ -223,6 +249,8 @@ class Operations:
             CREATE TABLE IF NOT EXISTS ops_requests (
                 client TEXT NOT NULL, request_key TEXT NOT NULL, input_hash TEXT NOT NULL,
                 record_id TEXT NOT NULL, PRIMARY KEY(client,request_key));
+            CREATE TABLE IF NOT EXISTS ops_native_results (
+                request_id TEXT PRIMARY KEY, record_id TEXT NOT NULL UNIQUE REFERENCES ops_records(id));
         ''')
 
     def __enter__(self):
@@ -307,6 +335,31 @@ class Operations:
 
     def preview(self, limit=100):
         return _preview(self.db, limit)
+
+    def collect_native_result(self, request_id, entry, entry_sha256, device):
+        from native_actions import read_result, validate_receipt, submission
+        request=self.get(request_id)
+        if request['schema']!='FalconProActionRequest/v1' or request['action']!='switch_to_enforce':
+            raise ValueError('Unsupported action request')
+        expected=submission(self,request_id)['nativeSource']
+        receipt=validate_receipt(read_result(request,entry,entry_sha256,device,source=self.source),request,device)
+        if receipt['linkage']['nativeSource']!=expected:
+            raise ValueError('Native receipt source differs from current event')
+        payload=dict(schema='FalconProNativeActionResult/v1',request=request,nativeReceipt=receipt,
+                     action='switch_to_enforce',eventId=request['eventId'],evidenceSha256=request['evidenceSha256'],
+                     approvalState='native_receipt_recorded',executionState=receipt['outcome'],simulated=request['simulated'],
+                     verificationProvenance='verified_locally_not_device_signed')
+        key=digest({'nativeResultFor':request_id})[:32]
+        with self._transaction():
+            prior=self.db.execute('SELECT record_id FROM ops_native_results WHERE request_id=?',(request_id,)).fetchone()
+            if prior:
+                previous=self.get(prior[0])
+                if previous.get('nativeReceipt')!=receipt or previous.get('request')!=request:
+                    raise ValueError('Native result identity conflict')
+                return previous
+            record=self._append(payload,'native_result',request['eventId'],request['evidenceSha256'],key,digest(payload))
+            self.db.execute('INSERT INTO ops_native_results VALUES (?,?)',(request_id,record['recordId']))
+            return record
 
     def reserve(self, record_id, destination):
         identifier(record_id)

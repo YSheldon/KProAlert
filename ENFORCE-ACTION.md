@@ -2,7 +2,7 @@
 
 The user selected `switch_to_enforce` as the first actual response to implement.
 It must use the existing driver's signed SetPolicy path, not a new driver.
-**The execution channel is still pending.** `propose_action` records a request;
+**The bound execution channel is candidate-only, not released.** `propose_action` records a request;
 `policyMutationAvailable=false` and `aiActionExecutionAvailable=false` remain
 truthful until the native flow and its acceptance pass.
 
@@ -38,8 +38,9 @@ quarantine or exception creation is authorized by this action.
 
 ## Implementation Boundary
 
-The existing service-local upgrade mailbox only supports snapshot, verification
-and PPL uninstall. It must be extended together with the native confirmation and
-durable-policy flow before this action is exposed. No driver/event wire change is
-required. Do not fabricate a new service verb or invoke standalone DLL control
+The candidate service-local mailbox supports authenticated enforcement and
+durable-policy readback. The new request-ID-only native binding still requires
+signed end-to-end acceptance before release. See the candidate contract in
+[AI-OPERATIONS.md](AI-OPERATIONS.md#candidate-native-action-binding).
+No driver/event wire change is required. Do not fabricate a service verb or invoke standalone DLL control
 from an untrusted/non-PPL AI process to bypass service authentication.

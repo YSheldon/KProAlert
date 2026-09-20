@@ -4,6 +4,7 @@ import hashlib
 import re
 import json
 import sqlite3
+import subprocess
 from importlib.metadata import version
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
@@ -17,7 +18,7 @@ from operations import V1_CAPABILITIES
 
 _source_hash = hashlib.sha256(b''.join(
     Path(__file__).with_name(name).read_bytes()
-    for name in ('mcp_server.py', 'query.py', 'feishu_reader.py', 'guidance.py', 'collector_health.py', 'endpoint.py', 'EndpointFacts.ps1', 'windows_tools.py', 'operations.py', 'notification_journal.py'))).hexdigest()
+    for name in ('mcp_server.py', 'query.py', 'feishu_reader.py', 'guidance.py', 'collector_health.py', 'endpoint.py', 'EndpointFacts.ps1', 'windows_tools.py', 'operations.py', 'notification_journal.py', 'native_actions.py', 'native_provenance.py', 'native_receipt_reader.py', 'spool.py'))).hexdigest()
 _started_pid = os.getpid()
 _plugin_version = json.loads((Path(__file__).parents[1] / '.codex-plugin/plugin.json').read_text())['version']
 _sdk_version = version('mcp')
@@ -25,6 +26,7 @@ _sdk_version = version('mcp')
 server = FastMCP('FalconPro')
 read_only = ToolAnnotations(readOnlyHint=True, destructiveHint=False, idempotentHint=True)
 append_record = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=True)
+native_confirmation = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False)
 
 
 @server.tool(annotations=read_only)
@@ -37,6 +39,8 @@ def integration_status() -> dict:
                 feishuConfigured=all(os.environ.get(k) for k in
                     ('KPRO_LARK_CLI', 'KPRO_FEISHU_BASE', 'KPRO_FEISHU_TABLE')),
                 operationsConfigured=bool(os.environ.get('KPRO_OPERATIONS_DATABASE')),
+                nativeActionConfigured=(os.name=='nt' and all(os.environ.get(k) for k in
+                    ('KPRO_NATIVE_ENTRY','KPRO_NATIVE_ENTRY_SHA256','KPRO_ENDPOINT_DEVICE_ID'))),
                 automaticRemediation=False, protectionStatus='not_probed')
 
 
@@ -107,6 +111,62 @@ def propose_action(decision_id: str, action: str, request_key: str) -> dict:
     except (OSError, ValueError, sqlite3.Error) as error:
         return {'error': str(error) if isinstance(error, ValueError) else 'Action request failed', 'executionState':'not_executed'}
 
+
+def _native_action_config():
+    values=tuple(os.environ.get(k,'') for k in ('KPRO_NATIVE_ENTRY','KPRO_NATIVE_ENTRY_SHA256','KPRO_ENDPOINT_DEVICE_ID'))
+    if not all(values):raise ValueError('Admitted native entry and local device are not configured')
+    return values
+
+@server.tool(annotations=native_confirmation)
+def request_native_action(request_id: str) -> dict:
+    """Request ONLY switch_to_enforce through the admitted local native entry.
+
+    Requires separate native human confirmation. Never call on a cloud host as
+    a substitute for the user's PC. No commands, paths, approval flags or result
+    JSON are accepted. Timeout/uncertainty means query the same ID, never replay.
+    """
+    from native_actions import request_action
+    try:
+        with _operations() as journal:
+            return request_action(journal,request_id,*_native_action_config())
+    except (OSError,ValueError,sqlite3.Error,subprocess.SubprocessError):
+        return {'error':'Native action refused or incomplete; inspect the native result before retrying',
+                'executionVerified':False,'automaticReplay':False}
+
+@server.tool(annotations=read_only)
+def native_action_result(request_id: str) -> dict:
+    """Read the bound result from the signed local native verifier. No result import or execution."""
+    from native_actions import read_request,read_result
+    try:
+        database=os.environ.get('KPRO_OPERATIONS_DATABASE')
+        source=os.environ.get('KPRO_ALERT_DATABASE')
+        if not database or not source:raise ValueError('Operations journal and source are not configured')
+        return read_result(read_request(database,request_id),*_native_action_config(),source=source)
+    except (OSError,ValueError,sqlite3.Error,subprocess.SubprocessError):
+        return {'error':'Verified native action receipt unavailable','executionVerified':False,'automaticReplay':False}
+
+@server.tool(annotations=append_record)
+def collect_native_action_result(request_id: str) -> dict:
+    """Append a freshly verified native result to the local operations outbox.
+
+    Does not execute actions or upload. Accepts an existing request ID only, not
+    AI-supplied success JSON. Delivery rechecks the protected native receipt.
+    """
+    try:
+        with _operations() as journal:
+            return journal.collect_native_result(request_id,*_native_action_config())
+    except (OSError,ValueError,sqlite3.Error,subprocess.SubprocessError):
+        return {'error':'Native receipt was not collected','executionVerified':False}
+
+@server.tool(annotations=read_only)
+def diagnose_native_action(request_id: str) -> dict:
+    """Read interrupted-request evidence. Never retries, writes or declares causal success."""
+    from native_actions import diagnose
+    try:
+        return diagnose(request_id,*_native_action_config())
+    except (OSError,ValueError,subprocess.SubprocessError):
+        return {'error':'Native diagnosis unavailable or protected state invalid',
+                'executionVerified':False,'automaticReplay':False}
 
 @server.tool(annotations=read_only)
 def endpoint_status() -> dict:

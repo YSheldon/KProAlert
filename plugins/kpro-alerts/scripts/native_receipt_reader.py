@@ -12,8 +12,10 @@ NAMES={'falconprosetup.exe','falconprosetup32.exe','falconprosetuparm.exe'}
 TRUST_SHA256='d106f5681c7041f68478163f8d7f324d226530e3052b3e68cc58d88758fd786f'
 
 
-def _request(entry,entry_sha256,device,transaction):
-    for value,length in ((entry_sha256,64),(device,64),(transaction,32)):
+def _request(entry,entry_sha256,device,transaction,*,identifier_length=32):
+    if identifier_length not in (32,64):
+        raise ValueError('Unsupported native identifier length')
+    for value,length in ((entry_sha256,64),(device,64),(transaction,identifier_length)):
         if not isinstance(value,str) or not re.fullmatch('[a-f0-9]{'+str(length)+'}',value):
             raise ValueError('Explicit native entry/device/transaction binding required')
     if not isinstance(entry,str) or len(entry)>32760 or any(ord(c)<32 for c in entry):

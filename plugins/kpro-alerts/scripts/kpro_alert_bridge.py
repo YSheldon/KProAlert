@@ -162,6 +162,16 @@ def ingest_document(store, device, document):
         raise ValueError('invalid dropped count')
     if len(document['records']) > 1024:
         raise ValueError('batch exceeds 1024 records')
+    records=document['records']
+    if 'nativeSources' in document:
+        from native_provenance import validate_source
+        sources=document['nativeSources']
+        if not isinstance(sources,list) or len(sources)!=len(records):
+            raise ValueError('Native source count differs from event count')
+        sources=[validate_source(source) for source in sources]
+        if any(not isinstance(record,dict) or '_nativeSource' in record for record in records):
+            raise ValueError('Ambiguous native source locator')
+        records=[dict(record,_nativeSource=source) for record,source in zip(records,sources)]
     digest = hashlib.sha256(json.dumps([device, document], sort_keys=True).encode()).hexdigest()
     with store.db:
         store.db.execute('BEGIN IMMEDIATE')
@@ -169,7 +179,7 @@ def ingest_document(store, device, document):
             return 0
         if store.db.execute('SELECT COUNT(*) FROM batches').fetchone()[0] >= store.max_events:
             raise RuntimeError('batch capacity reached')
-        count = sum(store._ingest(device, session, e) for e in document['records'])
+        count = sum(store._ingest(device, session, e) for e in records)
         store.db.execute('INSERT OR IGNORE INTO batches VALUES (?,?,?,?)',
                          (digest, device, session, dropped))
     return count

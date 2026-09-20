@@ -8,9 +8,11 @@ from operations import Operations, canonical, digest, preview
 
 
 def fields(record):
+    conclusion = (record['executionState'] if record['schema']=='FalconProNativeActionResult/v1'
+                  else record.get('verdict','action_request'))
     return {'分析ID': record['recordId'], '关联告警ID': record['eventId'], '记录类型': record['schema'],
             '分析来源': record['client'], '证据摘要': record['evidenceSha256'],
-            '分析结论': record.get('verdict', 'action_request'),
+            '分析结论': conclusion,
             '处置建议': record.get('action', ','.join(record.get('recommendedActions', []))),
             '记录时间': record['recordedAt'],
             '审批状态': record['approvalState'], '执行状态': record['executionState'],
@@ -40,24 +42,32 @@ def upload(database, source, cli, base, table, *, apply=False, limit=100, runner
         raise ValueError('Explicit operations destination required')
     destination = digest({'base': base, 'table': table})
     records = preview(database, limit)
-    result = dict(schema='FalconProOperationsUpload/v1', uploaded=0, readBack=0, uncertain=0,
+    result = dict(schema='FalconProOperationsUpload/v1', uploaded=0, readBack=0, uncertain=0, blocked=0,
                   records=[r['recordId'] for r in records], applied=apply, failures=[])
     if not apply or not records:
         return result
-    cli = _resolve_cli(cli) if apply else cli
     with Operations(database, source) as journal:
         for record in records:
+            if record['schema']=='FalconProNativeActionResult/v1':
+                from native_actions import verify_delivery
+                try:
+                    verify_delivery(record,source)
+                except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+                    result['blocked']+=1
+                    result['failures'].append(dict(recordId=record['recordId'],stage='native_verification',errorClass=type(error).__name__))
+                    continue
+            resolved_cli = _resolve_cli(cli)
             journal.reserve(record['recordId'], destination)
             expected = fields(record)
             stage = 'write'
             try:
-                response = runner([cli, 'base', '+record-upsert', '--base-token', base, '--table-id', table,
+                response = runner([resolved_cli, 'base', '+record-upsert', '--base-token', base, '--table-id', table,
                     '--as', 'user', '--format', 'json', '--json', json.dumps(expected, ensure_ascii=False)],
                     capture_output=True, text=True, encoding='utf-8', timeout=60, check=True)
                 stage = 'write_receipt'
                 remote_id = _receipt(_parse_response(response, 'Operations write'))
                 stage = 'readback'
-                _read_verified(cli, base, table, remote_id, expected, runner)
+                _read_verified(resolved_cli, base, table, remote_id, expected, runner)
                 stage = 'ack'
                 journal.ack(record['recordId'], destination, remote_id)
                 result['uploaded'] += 1
@@ -82,6 +92,9 @@ def reconcile(database, source, cli, base, table, record_id, remote_id, *, runne
         if pending != ('pending',destination):
             raise ValueError('Record is not pending for that destination')
         record=journal.get(record_id)
+        if record['schema']=='FalconProNativeActionResult/v1':
+            from native_actions import verify_delivery
+            verify_delivery(record,source)
         _read_verified(_resolve_cli(cli),base,table,remote_id,fields(record),runner)
         journal.ack(record_id,destination,remote_id)
         return dict(recordId=record_id,remoteRecordId=remote_id,reconciled=True,resent=False)
