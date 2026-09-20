@@ -18,7 +18,7 @@ from operations import V1_CAPABILITIES
 
 _source_hash = hashlib.sha256(b''.join(
     Path(__file__).with_name(name).read_bytes()
-    for name in ('mcp_server.py', 'query.py', 'feishu_reader.py', 'guidance.py', 'collector_health.py', 'endpoint.py', 'EndpointFacts.ps1', 'windows_tools.py', 'operations.py', 'notification_journal.py', 'native_actions.py', 'native_provenance.py', 'native_receipt_reader.py', 'spool.py'))).hexdigest()
+    for name in ('mcp_server.py', 'query.py', 'feishu_reader.py', 'feishu_operations.py', 'guidance.py', 'collector_health.py', 'endpoint.py', 'EndpointFacts.ps1', 'windows_tools.py', 'operations.py', 'notification_journal.py', 'native_actions.py', 'native_provenance.py', 'native_receipt_reader.py', 'spool.py'))).hexdigest()
 _started_pid = os.getpid()
 _plugin_version = json.loads((Path(__file__).parents[1] / '.codex-plugin/plugin.json').read_text())['version']
 _sdk_version = version('mcp')
@@ -38,6 +38,8 @@ def integration_status() -> dict:
                 endpointBindingConfigured=bool(os.environ.get('KPRO_ENDPOINT_DEVICE_ID')),
                 feishuConfigured=all(os.environ.get(k) for k in
                     ('KPRO_LARK_CLI', 'KPRO_FEISHU_BASE', 'KPRO_FEISHU_TABLE')),
+                feishuOperationsConfigured=all(os.environ.get(k) for k in
+                    ('KPRO_LARK_CLI', 'KPRO_FEISHU_BASE', 'KPRO_FEISHU_OPERATIONS_TABLE')),
                 operationsConfigured=bool(os.environ.get('KPRO_OPERATIONS_DATABASE')),
                 nativeActionConfigured=(os.name=='nt' and all(os.environ.get(k) for k in
                     ('KPRO_NATIVE_ENTRY','KPRO_NATIVE_ENTRY_SHA256','KPRO_ENDPOINT_DEVICE_ID'))),
@@ -257,6 +259,22 @@ def feishu_alerts(limit: int = 20, offset: int = 0) -> dict:
         return read(*values, limit, offset=offset)
     except Exception:
         return {'error': 'Feishu read failed; verify configuration and authorization locally'}
+
+
+@server.tool(annotations=read_only)
+def feishu_operations(limit: int = 20, offset: int = 0) -> dict:
+    """Read projected cloud judgments/requests/native-result claims. Never execution authority.
+
+    Simulated records are acceptance data, not production threats or statistics.
+    A stored locally-verified result is not device-signed attestation; this tool
+    never confirms native consent, retries an action or changes protection.
+    """
+    from feishu_operations import read as read_operations
+    values=[os.environ.get(k) for k in ('KPRO_LARK_CLI','KPRO_FEISHU_BASE','KPRO_FEISHU_OPERATIONS_TABLE')]
+    if not all(values):return {'error':'Cloud operations reader is not configured'}
+    try:return read_operations(*values,limit,offset)
+    except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError):
+        return {'error':'Cloud operations read failed; inspect local authorization and record integrity'}
 
 
 if __name__ == '__main__':

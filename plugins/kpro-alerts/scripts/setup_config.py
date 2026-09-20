@@ -6,12 +6,15 @@ import re
 from pathlib import Path
 
 
-def build_config(database=None, cli=None, base=None, table=None, collector_health=None, endpoint_device_id=None, *, onboarding_only=False, operations_database=None, assistant_client=None, native_entry=None, native_entry_sha256=None):
-    if any((cli, base, table)) and not all((cli, base, table)):
-        raise ValueError('Feishu requires CLI, base and table together')
+def build_config(database=None, cli=None, base=None, table=None, collector_health=None, endpoint_device_id=None, *, onboarding_only=False, operations_database=None, assistant_client=None, native_entry=None, native_entry_sha256=None, operations_table=None):
+    if any((cli, base, table, operations_table)) and not (cli and base and (table or operations_table)):
+        raise ValueError('Feishu requires CLI, base and an explicit table together')
+    for value in (base, table, operations_table):
+        if value is not None and (not isinstance(value,str) or not re.fullmatch('[A-Za-z0-9]{1,128}',value)):
+            raise ValueError('Invalid Feishu source identifier')
     if type(onboarding_only) is not bool:
         raise ValueError('Onboarding mode must be explicit')
-    if onboarding_only and any((database, cli, base, table)):
+    if onboarding_only and any((database, cli, base, table, operations_table)):
         raise ValueError('Onboarding-only mode cannot replace configured data sources')
     if not database and not cli and not endpoint_device_id and not onboarding_only:
         raise ValueError('configure a local database or Feishu source')
@@ -38,8 +41,11 @@ def build_config(database=None, cli=None, base=None, table=None, collector_healt
         exe = Path(cli).resolve(strict=True)
         if not exe.is_file():
             raise ValueError('CLI must be a file')
-        env.update(KPRO_LARK_CLI=str(exe), KPRO_FEISHU_BASE=base,
-                   KPRO_FEISHU_TABLE=table)
+        env.update(KPRO_LARK_CLI=str(exe), KPRO_FEISHU_BASE=base)
+        if table:
+            env['KPRO_FEISHU_TABLE']=table
+        if operations_table:
+            env['KPRO_FEISHU_OPERATIONS_TABLE']=operations_table
     return {'mcpServers': {'kpro-alerts': {
         'command': str(Path(sys.executable).resolve()),
         'args': [str(Path(__file__).resolve().with_name('mcp_server.py'))],
@@ -58,6 +64,7 @@ if __name__ == '__main__':
     parser.add_argument('--cli')
     parser.add_argument('--base')
     parser.add_argument('--table')
+    parser.add_argument('--operations-table')
     parser.add_argument('--collector-health')
     parser.add_argument('--endpoint-device-id')
     parser.add_argument('--operations-database')
@@ -68,6 +75,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     config = build_config(args.database, args.cli, args.base, args.table, args.collector_health, args.endpoint_device_id,
                           onboarding_only=args.onboarding_only,operations_database=args.operations_database,
-                          native_entry=args.native_entry,native_entry_sha256=args.native_entry_sha256)
+                          native_entry=args.native_entry,native_entry_sha256=args.native_entry_sha256,
+                          operations_table=args.operations_table)
     save_config(args.output, config)
     print('Configuration generated; no client settings or services changed.')

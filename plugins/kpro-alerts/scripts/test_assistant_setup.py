@@ -6,6 +6,17 @@ from assistant_setup import make_plan, register, migrate, equivalent
 
 
 class AssistantSetupTests(unittest.TestCase):
+    def test_cloud_operations_only_plan_is_not_empty_onboarding(self):
+        with tempfile.TemporaryDirectory() as d:
+            cli=Path(d)/'client.exe';cli.touch()
+            for client in ('codex','cursor','grok','workbuddy'):
+                plan=make_plan(client,cli=str(cli),base='base123',operations_table='tblOps',
+                               client_command=[str(cli)])
+                self.assertFalse(plan['onboardingOnly'])
+                self.assertTrue(plan['dataSourcesConfigured'])
+                self.assertEqual(plan['server']['env']['KPRO_FEISHU_OPERATIONS_TABLE'],'tblOps')
+                self.assertFalse(plan['automaticRemediation'])
+
     def test_native_binding_is_forwarded_without_approval_or_registration(self):
         with tempfile.TemporaryDirectory() as d:
             cli=Path(d)/'client.exe';cli.touch()

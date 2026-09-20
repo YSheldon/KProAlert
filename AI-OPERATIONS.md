@@ -195,6 +195,34 @@ Readback conflicts remain pending. Journal capacity is bounded; a capacity error
 requires attention and must not be reported as successful collection. A local
 simulation claim is confirmed only with an exact configured simulation ID list.
 
+## Read Cloud Results From Another Assistant
+
+`feishu_operations(limit=20, offset=0)` is a read-only MCP tool for the separately
+authorized analysis table. Configure `KPRO_LARK_CLI`, `KPRO_FEISHU_BASE` and
+`KPRO_FEISHU_OPERATIONS_TABLE` on that assistant's own host. It does not require
+the endpoint's private paths, Windows credentials or native executable. The
+existing alert reader continues to use `KPRO_FEISHU_TABLE` independently.
+
+```text
+falconpro.py setup --client grok --cli <local-authorized-lark-cli> --base <base> --operations-table <analysis-table>
+```
+
+This previews configuration; it does not register, execute or approve anything.
+Use the equivalent client name for Codex, Cursor or WorkBuddy. Preserve existing
+configuration and use the client's normal configuration approval when adding a
+new data source. Restart the actual MCP process after updating its code, then
+check `integration_status.feishuOperationsConfigured` and `codeSha256`.
+
+The reader validates each structured record's digest, schema, row ID and
+simulation label before projecting IDs, safe classifications and policy-version
+summaries. A request remains `not_executed`. A native result carries
+`reportedOutcome` and `verificationProvenance`; the response is explicitly
+`cloud_stored_claim_not_device_attested`, never native execution authority.
+It does not export a replayable native receipt or raw paths/command lines.
+Invalid rows fail the page rather than silently omitting evidence. Pagination
+is bounded and not a full-statistics claim; simulated records must be excluded
+from production counts. Reading a record does not acknowledge a notification.
+
 ## Acceptance
 
 Unit and real stdio MCP transport tests cover binding, replay rejection, privacy,
@@ -203,6 +231,7 @@ and action request have been written to the authorized Feishu analysis table and
 read back. These are communication tests, not real threats or real actions.
 First-release acceptance requires the existing signed driver/DLL event stream,
 source health/loss evidence, actual client invocation, authorized notification
-delivery and summary readback. New native action results, policy application and
-new audit-driver tests are deferred phase-two gates. Do not claim either phase
-passed merely from connector tests.
+delivery and summary readback. The approved native switch_to_enforce candidate
+is now an active release gate, including endpoint result collection and exact
+cloud readback; the earlier analysis-only acceptance does not waive it. Extended
+audit-driver events remain deferred. Connector tests alone do not prove release.
