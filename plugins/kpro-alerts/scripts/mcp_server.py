@@ -19,6 +19,7 @@ from operations import V1_CAPABILITIES
 _source_hash = hashlib.sha256(b''.join(
     Path(__file__).with_name(name).read_bytes()
     for name in ('mcp_server.py', 'query.py', 'feishu_reader.py', 'feishu_operations.py', 'guidance.py', 'collector_health.py', 'endpoint.py', 'EndpointFacts.ps1', 'windows_tools.py', 'operations.py', 'notification_journal.py', 'native_actions.py', 'native_provenance.py', 'native_receipt_reader.py', 'spool.py'))).hexdigest()
+_source_hash = hashlib.sha256(bytes.fromhex(_source_hash) + Path(__file__).with_name('source_egress.py').read_bytes()).hexdigest()
 _started_pid = os.getpid()
 _plugin_version = json.loads((Path(__file__).parents[1] / '.codex-plugin/plugin.json').read_text())['version']
 _sdk_version = version('mcp')
@@ -40,6 +41,9 @@ def integration_status() -> dict:
                     ('KPRO_LARK_CLI', 'KPRO_FEISHU_BASE', 'KPRO_FEISHU_TABLE')),
                 feishuOperationsConfigured=all(os.environ.get(k) for k in
                     ('KPRO_LARK_CLI', 'KPRO_FEISHU_BASE', 'KPRO_FEISHU_OPERATIONS_TABLE')),
+                sourceEgressConfigured=all(os.environ.get(k) for k in
+                    ('KPRO_LARK_CLI', 'KPRO_FEISHU_BASE', 'KPRO_FEISHU_SOURCE_EGRESS_TABLE')),
+                sourceEgressScope='cloud_metadata_observations_read_only',
                 operationsConfigured=bool(os.environ.get('KPRO_OPERATIONS_DATABASE')),
                 nativeActionConfigured=(os.name=='nt' and all(os.environ.get(k) for k in
                     ('KPRO_NATIVE_ENTRY','KPRO_NATIVE_ENTRY_SHA256','KPRO_ENDPOINT_DEVICE_ID'))),
@@ -275,6 +279,21 @@ def feishu_operations(limit: int = 20, offset: int = 0) -> dict:
     try:return read_operations(*values,limit,offset)
     except (OSError,ValueError,KeyError,TypeError,subprocess.SubprocessError):
         return {'error':'Cloud operations read failed; inspect local authorization and record integrity'}
+
+
+@server.tool(annotations=read_only)
+def source_egress_alerts(limit: int = 20, offset: int = 0) -> dict:
+    """Read separate source-upload metadata observations. Claims are not proof of network upload.
+
+    No source contents or execution authority. Ransomware enforce mode is not
+    source-upload prevention; simulated observations are not production threats.
+    """
+    from source_egress import read as read_source
+    values = [os.environ.get(k) for k in ('KPRO_LARK_CLI', 'KPRO_FEISHU_BASE', 'KPRO_FEISHU_SOURCE_EGRESS_TABLE')]
+    if not all(values): return {'error': 'Source-egress reader is not configured'}
+    try: return read_source(*values, limit, offset)
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        return {'error': 'Source-egress evidence unavailable', 'coverage': 'unknown'}
 
 
 if __name__ == '__main__':
