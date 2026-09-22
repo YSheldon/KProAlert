@@ -24,6 +24,13 @@ class OperationsMcpTests(unittest.IsolatedAsyncioTestCase):
             async with stdio_client(parameters) as (reader,writer):
                 async with ClientSession(reader,writer) as client:
                     await client.initialize()
+                    tools={item.name:item for item in (await client.list_tools()).tools}
+                    for name in ('request_native_action','native_action_result','collect_native_action_result','diagnose_native_action'):
+                        self.assertEqual(set(tools[name].inputSchema['properties']),{'request_id'})
+                    self.assertTrue(tools['request_native_action'].annotations.destructiveHint)
+                    self.assertTrue(tools['native_action_result'].annotations.readOnlyHint)
+                    self.assertTrue(tools['diagnose_native_action'].annotations.readOnlyHint)
+                    self.assertFalse(tools['collect_native_action_result'].annotations.readOnlyHint)
                     async def call(name,args):
                         reply=await client.call_tool(name,args)
                         return json.loads(next(c.text for c in reply.content if c.type=='text'))
@@ -44,4 +51,6 @@ class OperationsMcpTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(request['executionState'],'not_executed')
                     self.assertEqual(request['approvalState'],'requires_native_confirmation')
                     self.assertFalse(request['executionAvailable'])
+                    result=await call('collect_native_action_result',{'request_id':request['recordId']})
+                    self.assertIs(result['executionVerified'],False)
             self.assertEqual(status(journal)['records'],2)

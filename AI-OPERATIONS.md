@@ -8,7 +8,7 @@ protection behavior. No driver update, re-signing, PPL change or new audit polic
 is required for this analysis feature. Do not switch a protected endpoint to
 Audit or disable existing protection to feed the AI.
 
-The five adapters share the same MCP contract. Assessments, recommendations and
+The adapters share the same MCP contract (ZCode acceptance is deferred). Assessments, recommendations and
 unapproved request records can be stored and explicitly uploaded with exact
 Feishu readback. First-release AI does not execute termination, quarantine,
 deletion, exceptions, isolation or policy changes. Existing driver blocking and
@@ -23,7 +23,8 @@ that a particular endpoint is installed or healthy.
 The user subsequently selected `switch_to_enforce` as the first native action
 to implement. This is a one-way, confirmation-required signed-policy transition,
 not permission to switch to Audit or execute arbitrary remediation. Its native
-execution channel is not implemented yet; see [ENFORCE-ACTION.md](ENFORCE-ACTION.md).
+execution channel is implemented on this candidate branch but is not released
+or accepted on a signed endpoint yet; see [ENFORCE-ACTION.md](ENFORCE-ACTION.md).
 Extended driver Audit events remain deferred and are not required. Real data delivery, five-client
 runtime and notification acceptance, authorized uploads, and applicable existing
 package installation/upgrade gates still apply to the first release.
@@ -100,7 +101,71 @@ a SHA-256 digest. The future native broker must verify its own original evidence
 
 `FalconProAIDecision/v1` is an AI assertion, not confirmed malware ground truth.
 `FalconProActionRequest/v1` is a request, not an approval or execution receipt.
-There is no supported record format for claiming native execution yet.
+The candidate adds `FalconProNativeActionResult/v1`, described below. An AI
+assessment or action request must never be relabeled as this result.
+
+## Candidate Native Action Binding
+
+This section describes unreleased candidate code, not installed release capability.
+The existing driver protocol is unchanged. A new service safe-spool projection
+adds `nativeSources` (private batch SHA-256 and original record index); older
+events without it remain analysis-only. It is a locator, not an attestation.
+Upgrade the collector/connector reader first, restart its actual MCP process and
+verify `integration_status.codeSha256` before deploying this service candidate.
+Older strict safe-batch readers reject the additional envelope field; unchanged
+driver event records do not imply mixed service/collector versions are supported.
+The new reader continues to accept old batches for analysis only.
+
+The local Windows connector uses an admitted signed native entry configured with
+`KPRO_NATIVE_ENTRY`, `KPRO_NATIVE_ENTRY_SHA256` and `KPRO_ENDPOINT_DEVICE_ID`.
+These values select verified local release material, not commands supplied by
+an event or model. Cloud-hosted assistants cannot execute on the user's PC by
+running this tool in the cloud. No private signing key is distributed.
+
+The shared `falconpro.py setup` command accepts `--native-entry` and
+`--native-entry-sha256` together with `--device-id`, `--database` and
+`--operations-database`. Preview first; configuration is not signature verification
+or approval to execute. Each native call still pins the admitted hash and verifies
+the publisher. No automatic approval is configured. Cloud users must not supply
+another computer's path or device ID. Existing connector migrations preserve
+their environment and reject these new binding arguments rather than silently
+overwriting it; use `setup_config.py --output <new-file>` for a separately reviewed
+configuration export, then the client's normal configuration approval flow.
+
+1. `propose_action` records an unapproved `switch_to_enforce` request.
+2. `request_native_action(request_id)` resolves original private evidence,
+   validates device/PPL/signatures/current policy and asks for native human
+   confirmation. It accepts no paths, commands, approval flags or result JSON.
+3. `native_action_result(request_id)` reads the protected native result. It is
+   read-only and cannot change an uncertain request into a success.
+4. `collect_native_action_result(request_id)` appends that freshly read result
+   to the operations outbox; it does not upload or perform the action again.
+5. Authorized delivery re-reads the native result before sending. Missing or
+   changed native proof blocks delivery; exact remote readback precedes ACK.
+
+Collection, readback and delivery also require the retained source event to
+match its original evidence digest and native locator. Keep that event until
+delivery is acknowledged; if it has expired or changed, delivery is blocked,
+not silently accepted. Clients sharing one operations database deduplicate a
+native result globally by request ID. Independent databases are separate
+journals and must not be summed as unique actions without request-ID deduplication.
+
+Linkage includes request/decision/event/evidence IDs, batch/index, source-session
+hash/sequence, original record hash, native transaction and source/target policy
+hashes. Exact before/after service snapshots are retained. Outcomes distinguish
+cancelled, rejected, failed, outcome_uncertain, already_enforced_verified and
+executed_verified. A missing/partial durable reservation must not be replayed.
+It requires reconciliation, never a fabricated result or a new automatic try.
+`diagnose_native_action(request_id)` performs that read-only inspection using
+protected records and a current native snapshot. It may report a matching
+transaction/post-state, but always keeps `executionVerified=false` and
+`causalityVerified=false`. It cannot write a missing receipt, erase a reservation,
+retry SetPolicy or turn an observation into a verified execution result.
+
+`verificationProvenance=verified_locally_not_device_signed` is deliberate.
+The endpoint administrator is inside the local trust boundary. These uploaded
+records are not hardware-signed proof, malware ground truth, or proof of AI
+identity. Simulated acceptance records do not count as production operations.
 
 ## Explicit Operations Upload
 
@@ -130,6 +195,34 @@ Readback conflicts remain pending. Journal capacity is bounded; a capacity error
 requires attention and must not be reported as successful collection. A local
 simulation claim is confirmed only with an exact configured simulation ID list.
 
+## Read Cloud Results From Another Assistant
+
+`feishu_operations(limit=20, offset=0)` is a read-only MCP tool for the separately
+authorized analysis table. Configure `KPRO_LARK_CLI`, `KPRO_FEISHU_BASE` and
+`KPRO_FEISHU_OPERATIONS_TABLE` on that assistant's own host. It does not require
+the endpoint's private paths, Windows credentials or native executable. The
+existing alert reader continues to use `KPRO_FEISHU_TABLE` independently.
+
+```text
+falconpro.py setup --client grok --cli <local-authorized-lark-cli> --base <base> --operations-table <analysis-table>
+```
+
+This previews configuration; it does not register, execute or approve anything.
+Use the equivalent client name for Codex, Cursor or WorkBuddy. Preserve existing
+configuration and use the client's normal configuration approval when adding a
+new data source. Restart the actual MCP process after updating its code, then
+check `integration_status.feishuOperationsConfigured` and `codeSha256`.
+
+The reader validates each structured record's digest, schema, row ID and
+simulation label before projecting IDs, safe classifications and policy-version
+summaries. A request remains `not_executed`. A native result carries
+`reportedOutcome` and `verificationProvenance`; the response is explicitly
+`cloud_stored_claim_not_device_attested`, never native execution authority.
+It does not export a replayable native receipt or raw paths/command lines.
+Invalid rows fail the page rather than silently omitting evidence. Pagination
+is bounded and not a full-statistics claim; simulated records must be excluded
+from production counts. Reading a record does not acknowledge a notification.
+
 ## Acceptance
 
 Unit and real stdio MCP transport tests cover binding, replay rejection, privacy,
@@ -138,6 +231,7 @@ and action request have been written to the authorized Feishu analysis table and
 read back. These are communication tests, not real threats or real actions.
 First-release acceptance requires the existing signed driver/DLL event stream,
 source health/loss evidence, actual client invocation, authorized notification
-delivery and summary readback. New native action results, policy application and
-new audit-driver tests are deferred phase-two gates. Do not claim either phase
-passed merely from connector tests.
+delivery and summary readback. The approved native switch_to_enforce candidate
+is now an active release gate, including endpoint result collection and exact
+cloud readback; the earlier analysis-only acceptance does not waive it. Extended
+audit-driver events remain deferred. Connector tests alone do not prove release.

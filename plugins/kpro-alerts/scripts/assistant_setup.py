@@ -31,13 +31,15 @@ def discover_client(client):
 
 
 def make_plan(client, database=None, cli=None, base=None, table=None,
-              client_command=None, workbuddy_config=None, collector_health=None, endpoint_device_id=None, operations_database=None):
+              client_command=None, workbuddy_config=None, collector_health=None, endpoint_device_id=None, operations_database=None,
+              native_entry=None,native_entry_sha256=None,operations_table=None):
     if client not in ('codex', 'workbuddy', 'cursor', 'grok', 'zcode', 'generic'):
         raise ValueError('Unsupported assistant')
-    onboarding_only = not any((database, cli, base, table))
+    onboarding_only = not any((database, cli, base, table, operations_table))
     server = build_config(database, cli, base, table, collector_health, endpoint_device_id,
                           onboarding_only=onboarding_only, operations_database=operations_database,
-                          assistant_client=client)['mcpServers']['kpro-alerts']
+                          assistant_client=client,native_entry=native_entry,native_entry_sha256=native_entry_sha256,
+                          operations_table=operations_table)['mcpServers']['kpro-alerts']
     command = []
     if client in ('codex', 'workbuddy'):
         command = client_command or discover_client(client)
@@ -251,6 +253,7 @@ def main():
     parser.add_argument('--cli')
     parser.add_argument('--base')
     parser.add_argument('--table')
+    parser.add_argument('--operations-table')
     parser.add_argument('--workbuddy-config')
     parser.add_argument('--collector-health')
     parser.add_argument('--endpoint-device-id')
@@ -258,7 +261,7 @@ def main():
     args = parser.parse_args()
     plan = make_plan(args.client,args.database,args.cli,args.base,args.table,
                      workbuddy_config=args.workbuddy_config,collector_health=args.collector_health,
-                     endpoint_device_id=args.endpoint_device_id)
+                     endpoint_device_id=args.endpoint_device_id,operations_table=args.operations_table)
     if args.apply:
         # Probe this interpreter, not a different PATH Python. No package download here.
         probe = subprocess.run([plan['server']['command'],'-I','-c',

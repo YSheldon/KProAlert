@@ -18,7 +18,7 @@ def validate_safe_batch(document):
             document.get('schema') != 'KProSafeEventBatch/v1' or
             document.get('redacted') is not True):
         raise ValueError('redacted service batch required')
-    if set(document) - {'schema','redacted','session','batchId','dropped','projectionDropped','records'}:
+    if set(document) - {'schema','redacted','session','batchId','dropped','projectionDropped','records','nativeSources'}:
         raise ValueError('unknown batch field')
     for name in ('session','batchId'):
         value=document.get(name,'')
@@ -31,6 +31,12 @@ def validate_safe_batch(document):
     records=document.get('records')
     if not isinstance(records,list):
         raise ValueError('safe records required')
+    if 'nativeSources' in document:
+        from native_provenance import validate_source
+        sources=document['nativeSources']
+        if not isinstance(sources,list) or len(sources)!=len(records):
+            raise ValueError('Native source count differs from event count')
+        for source in sources:validate_source(source)
     for record in records:
         if not isinstance(record,dict) or any(
                 not key.isascii() or not key.isalnum() or len(key)>80 or
