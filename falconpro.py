@@ -23,6 +23,7 @@ def main():
     setup.add_argument('--base')
     setup.add_argument('--table')
     setup.add_argument('--operations-table')
+    setup.add_argument('--source-egress-table')
     setup.add_argument('--collector-health')
     setup.add_argument('--device-id')
     setup.add_argument('--operations-database')
@@ -114,7 +115,7 @@ def main():
         value=make_plan(args.client,args.database,args.cli,args.base,args.table,
                         collector_health=args.collector_health,endpoint_device_id=args.device_id,
                         operations_database=args.operations_database,native_entry=args.native_entry,
-                        native_entry_sha256=args.native_entry_sha256,operations_table=args.operations_table)
+                        native_entry_sha256=args.native_entry_sha256,operations_table=args.operations_table,source_egress_table=args.source_egress_table)
         if args.update and args.native_entry:
             raise ValueError('Migration preserves existing environment; export reviewed native configuration separately instead of overwriting it')
         if args.update and not args.apply:

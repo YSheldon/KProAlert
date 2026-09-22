@@ -8,6 +8,21 @@ from setup_config import build_config, save_config
 
 
 class SetupTests(unittest.TestCase):
+    def test_source_egress_setup_is_separate_read_only_binding(self):
+        with tempfile.TemporaryDirectory() as d:
+            cli=Path(d)/'lark.exe'; cli.touch()
+            config=build_config(cli=str(cli),base='base123',source_egress_table='tblEgress')
+            env=config['mcpServers']['kpro-alerts']['env']
+            self.assertEqual(env['KPRO_FEISHU_SOURCE_EGRESS_TABLE'],'tblEgress')
+            self.assertNotIn('KPRO_FEISHU_TABLE',env)
+            with self.assertRaises(ValueError):
+                build_config(cli=str(cli),base='base123',table='same',source_egress_table='same')
+            result=subprocess.run([sys.executable,str(Path(__file__).resolve().parents[3]/'falconpro.py'),
+                'setup','--client','grok','--cli',str(cli),'--base','base123','--source-egress-table','tblEgress'],
+                capture_output=True,text=True,timeout=15)
+            self.assertEqual(result.returncode,0,result.stderr)
+            self.assertEqual(json.loads(result.stdout)['server']['env']['KPRO_FEISHU_SOURCE_EGRESS_TABLE'],'tblEgress')
+
     def test_shared_entry_exports_cloud_reader_without_registering(self):
         with tempfile.TemporaryDirectory() as d:
             cli=Path(d)/'lark.exe';cli.touch()

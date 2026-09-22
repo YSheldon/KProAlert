@@ -223,6 +223,29 @@ Invalid rows fail the page rather than silently omitting evidence. Pagination
 is bounded and not a full-statistics claim; simulated records must be excluded
 from production counts. Reading a record does not acknowledge a notification.
 
+### Interpret Linked Results, Not Isolated Rows
+
+The request is immutable proposal-time history. Its `not_executed` field does
+not mean the request is still pending when a matching native-result record
+reports completion. Join the result's `requestId` and `decisionId` to the original
+records and compare `eventId` and `evidenceSha256`. Report the result outcome;
+never re-execute an old request merely because its historical state is unchanged.
+If a bounded page does not contain the linked result, report the outcome as
+unknown from that page, not definitively unexecuted.
+
+`simulated=true` means acceptance/test data, excluded from production counts.
+A benign acceptance may still contain a real native policy switch. Describe
+the reported result and its provenance without treating it as a new permission
+to act or as hardware attestation.
+
+Advice must follow the available evidence. For a known benign test, preserve
+the receipt and avoid quarantine, deletion or credential resets. Do not claim
+an application failure was caused by enforcement without correlated endpoint
+evidence. Ask about ongoing damage, backups, shared storage and the user's
+home/office/development/critical-business context only when relevant. Notification
+delivery, user-read acknowledgement and current endpoint protection status are
+separate facts and must not be inferred from a successful cloud query.
+
 ## Acceptance
 
 Unit and real stdio MCP transport tests cover binding, replay rejection, privacy,
