@@ -21,10 +21,7 @@ def alert(alert_id="ALERT-1", sequence=1, **extra):
 
 
 class NotificationJournalTests(unittest.TestCase):
-    def test_result_prepare_does_not_return_a_concurrently_acknowledged_draft(self):
-        journal = NotificationJournal(self.path)
-        journal.baseline([], [])
-        journal.baseline_results([])
+    def test_prepare_does_not_return_draft_after_concurrent_state_change(self):
         result = dict(recordId="a" * 64, schema="FalconProNativeActionResult/v1",
                       eventId="b" * 64, evidenceSha256="c" * 64,
                       requestId="d" * 64, decisionId="e" * 64,
@@ -33,17 +30,43 @@ class NotificationJournalTests(unittest.TestCase):
                       verificationProvenance="verified_locally_not_device_signed",
                       beforePolicyVersion="100", targetPolicyVersion="101",
                       afterPolicyVersion="101", simulated=False)
-        read_drafts = journal._drafts_for_keys
+        for kind in ("alert", "fault-active", "fault-recovered", "result"):
+            for transition in ("acknowledged", "uncertain"):
+                with self.subTest(kind=kind, transition=transition):
+                    path = Path(self.temp.name) / (kind + "-" + transition + ".db")
+                    journal = NotificationJournal(path)
+                    journal.baseline([], [])
+                    if kind == "result":
+                        journal.baseline_results([])
+                    if kind == "fault-recovered":
+                        prior = journal.prepare([], [], {"active": True, "code": 5})
+                        journal.ack(prior["token"], "prior-fault-receipt")
+                    read_drafts = journal._drafts_for_keys
 
-        def acknowledge_before_read(token, keys):
-            NotificationJournal(self.path).ack(token, "client-native-receipt")
-            return read_drafts(token, keys)
+                    def change_state_before_read(token, keys):
+                        def change_state():
+                            concurrent = NotificationJournal(path)
+                            if transition == "acknowledged":
+                                concurrent.ack(token, "client-native-receipt")
+                            else:
+                                concurrent.mark_uncertain(token)
 
-        journal._drafts_for_keys = acknowledge_before_read
-        prepared = journal.prepare_results([result])
-        self.assertEqual(prepared["drafts"], [])
-        self.assertEqual(journal.status(prepared["token"])["stateCounts"],
-                         {"acknowledged": 1})
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                            pool.submit(change_state).result(timeout=5)
+                        return read_drafts(token, keys)
+
+                    journal._drafts_for_keys = change_state_before_read
+                    if kind == "alert":
+                        prepared = journal.prepare([alert("CONCURRENT")], [])
+                    elif kind == "fault-active":
+                        prepared = journal.prepare([], [], {"active": True, "code": 5})
+                    elif kind == "fault-recovered":
+                        prepared = journal.prepare([], [], {"active": False})
+                    else:
+                        prepared = journal.prepare_results([result])
+                    self.assertEqual(prepared["drafts"], [])
+                    self.assertEqual(journal.status(prepared["token"])["stateCounts"],
+                                     {transition: 1})
 
     def test_native_result_is_deduplicated_and_ack_is_not_delivery(self):
         journal = NotificationJournal(self.path)
