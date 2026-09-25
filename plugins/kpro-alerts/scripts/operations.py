@@ -370,13 +370,46 @@ class Operations:
             if changed != 1:
                 raise ValueError('Record already reserved; reconcile before retry')
 
+    def remember_remote_id(self, record_id, destination, remote_id):
+        identifier(record_id)
+        identifier(destination)
+        if not isinstance(remote_id, str) or not re.fullmatch('rec[A-Za-z0-9]{1,100}', remote_id):
+            raise ValueError('Invalid remote receipt')
+        with self._transaction():
+            row = self.db.execute('SELECT state,record_id,destination FROM ops_outbox WHERE id=?',
+                                  (record_id,)).fetchone()
+            if row is None or row[0] != 'pending' or row[2] != destination:
+                raise ValueError('Remote receipt has no matching pending destination')
+            if row[1] is not None and row[1] != remote_id:
+                raise ValueError('Remote receipt identity changed')
+            if row[1] is None:
+                changed = self.db.execute(
+                    'UPDATE ops_outbox SET record_id=? WHERE id=? AND state=\'pending\' '
+                    'AND destination=? AND record_id IS NULL',
+                    (remote_id, record_id, destination)).rowcount
+                if changed != 1:
+                    raise ValueError('Remote receipt reservation changed')
+
+    def pending_remote_id(self, record_id, destination):
+        identifier(record_id)
+        identifier(destination)
+        row = self.db.execute('SELECT state,record_id,destination FROM ops_outbox WHERE id=?',
+                              (record_id,)).fetchone()
+        if row is None or row[0] != 'pending' or row[2] != destination:
+            raise ValueError('Record is not pending for that destination')
+        if row[1] is not None and (not isinstance(row[1], str) or
+                                   not re.fullmatch('rec[A-Za-z0-9]{1,100}', row[1])):
+            raise ValueError('Persisted remote receipt is invalid')
+        return row[1]
+
     def ack(self, record_id, destination, remote_id):
         if not isinstance(remote_id, str) or not re.fullmatch('rec[A-Za-z0-9]{1,100}', remote_id):
             raise ValueError('Invalid remote receipt')
         with self._transaction():
             changed = self.db.execute('UPDATE ops_outbox SET state=\'acknowledged\',record_id=? '
-                                      'WHERE id=? AND state=\'pending\' AND destination=?',
-                                      (remote_id, identifier(record_id), identifier(destination))).rowcount
+                                      'WHERE id=? AND state=\'pending\' AND destination=? '
+                                      'AND (record_id IS NULL OR record_id=?)',
+                                      (remote_id, identifier(record_id), identifier(destination), remote_id)).rowcount
             if changed != 1:
                 raise ValueError('Receipt does not match pending destination')
 

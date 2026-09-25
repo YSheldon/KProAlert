@@ -145,6 +145,29 @@ configuration export, then the client's normal configuration approval flow.
 5. Authorized delivery re-reads the native result before sending. Missing or
    changed native proof blocks delivery; exact remote readback precedes ACK.
 
+After a remote upsert returns a record ID, the connector stores that ID in the
+pending outbox before attempting the exact readback. A later `reconcile` without
+an explicit remote ID reuses the persisted ID and performs only a read; a
+different explicit ID is rejected. If the response is lost before the ID is
+saved, reconciliation performs a read-only exact filter on the local `分析ID`,
+requires exactly one match, then fetches and compares the complete record before
+ACK. No match, duplicate matches, malformed results or payload mismatch leave
+the outbox pending. Reconciliation never POSTs again.
+
+The following is a maintainer/source-checkout recovery path; it is not part of
+the signed endpoint installer. For a pending record, the operator may run:
+
+```powershell
+python falconpro.py operations reconcile `
+  --database "<operations.db>" --source "<events.db>" --cli "<lark-cli>" `
+  --base "<base-token>" --table "<operations-table>" `
+  --record-id "<recordId>" --apply
+```
+
+`--remote-record-id` is optional: omit it to use the persisted receipt or exact
+`分析ID` lookup. `--apply` changes only the local outbox state after the remote
+payload has been verified; it does not send or replay a write.
+
 Collection, readback and delivery also require the retained source event to
 match its original evidence digest and native locator. Keep that event until
 delivery is acknowledged; if it has expired or changed, delivery is blocked,
@@ -187,11 +210,17 @@ Existing human-review fields are never written by AI.
 Pending state is stored before any network write. A successful CLI exit is not
 enough: exact field readback is required before ACK. Readback may retry three
 times; writes never retry automatically. An uncertain result stays pending and
-must be found by its exact 分析ID, then reconciled without sending again:
+is reconciled without sending again. The connector first reuses a persisted
+remote ID; if the write response was lost before that ID was saved, it searches
+the exact local 分析ID and accepts only one match:
 
 ```text
-falconpro.py operations reconcile --database <operations.db> --source <events.db> --cli <authorized-lark-cli> --base <base> --table <analysis-table> --record-id <64-hex-local-id> --remote-record-id <rec-id> --apply
+falconpro.py operations reconcile --database <operations.db> --source <events.db> --cli <authorized-lark-cli> --base <base> --table <analysis-table> --record-id <64-hex-local-id> --apply
 ```
+
+If an operator already knows the remote record ID, add
+`--remote-record-id <rec-id>`; it must match any persisted ID. No-match and
+duplicate-match cases stay pending and are never resent automatically.
 
 Readback conflicts remain pending. Journal capacity is bounded; a capacity error
 requires attention and must not be reported as successful collection. A local
