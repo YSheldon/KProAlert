@@ -2,10 +2,70 @@ import unittest
 from unittest.mock import patch
 import tempfile
 from pathlib import Path
-from notify import collect_alerts, check
+from notify import collect_alerts, collect_results, check, load_config
 
 
 class NotifyTests(unittest.TestCase):
+    def test_new_native_result_is_drafted_only_after_result_baseline(self):
+        from notification_journal import NotificationJournal
+        with tempfile.TemporaryDirectory() as directory:
+            cfg={'state':str(Path(directory)/'notifications.db'),'source':{},
+                 'operationsSource':{},'maxPages':1,'collectorHealth':None,
+                 'knownSimulationIds':[],'profile':'home','context':{}}
+            journal=NotificationJournal(cfg['state'])
+            journal.baseline([],[])
+            result=dict(recordId='a'*64,schema='FalconProNativeActionResult/v1',
+                eventId='b'*64,evidenceSha256='c'*64,requestId='d'*64,decisionId='e'*64,
+                action='switch_to_enforce',executionState='executed_verified',
+                reportedOutcome='executed_verified',verificationProvenance='verified_locally_not_device_signed',
+                beforePolicyVersion='100',targetPolicyVersion='101',afterPolicyVersion='101',simulated=False)
+            with patch('notify.collect_alerts',return_value=([],0)), \
+                 patch('notify.collect_results',return_value=([result],0)):
+                self.assertTrue(check(cfg)['baselineRequired'])
+                journal.baseline_results([])
+                draft=[d for batch in check(cfg)['batches'] for d in batch['drafts']]
+                self.assertEqual(len(draft),1)
+                self.assertEqual(draft[0]['kind'],'result')
+                self.assertEqual(draft[0]['recordId'],result['recordId'])
+                self.assertFalse(draft[0]['deliveryConfirmed'])
+                self.assertEqual(draft[0]['guidance']['profile'],'home')
+                self.assertTrue(draft[0]['guidance']['questions'])
+                self.assertEqual(check(cfg)['batches'],[])
+            with patch('notify.collect_alerts',return_value=([],0)), \
+                 patch('notify.collect_results',return_value=([],16)):
+                failed=check(cfg)
+                self.assertEqual(failed['faultCode'],16)
+                self.assertTrue(failed['batches'])
+
+    def test_result_pagination_requires_progress_and_reports_incomplete_coverage(self):
+        calls=[]
+        def reader(cli,base,table,limit,offset):
+            calls.append(offset)
+            return {'records':[],'hasMore':True,'nextOffset':offset+1}
+        records,code=collect_results({'cli':'x','base':'b','table':'t'},2,reader)
+        self.assertEqual((records,code),([],16))
+        self.assertEqual(calls,[0])
+
+    def test_operations_source_is_optional_but_must_be_explicit_when_present(self):
+        import json
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            base={'schema':'KProNotify/v1','state':str(root/'notifications.db'),
+                  'source':{'cli':str(root/'lark.exe'),'base':'BASE','table':'ALERTS'},
+                  'profile':'home','context':{},'knownSimulationIds':[],
+                  'maxPages':1,'collectorHealth':None}
+            config=root/'config.json'
+            config.write_text(json.dumps(base),encoding='utf-8')
+            self.assertNotIn('operationsSource',load_config(config))
+            configured=dict(base,operationsSource={'cli':str(root/'lark.exe'),
+                'base':'BASE','table':'OPERATIONS'})
+            config.write_text(json.dumps(configured),encoding='utf-8')
+            self.assertEqual(load_config(config)['operationsSource']['table'],'OPERATIONS')
+            for value in ({'cli':'relative.exe','base':'BASE','table':'OPERATIONS'},
+                          {'cli':str(root/'lark.exe'),'base':'BASE','table':'bad/path'}):
+                config.write_text(json.dumps(dict(base,operationsSource=value)),encoding='utf-8')
+                with self.assertRaises(ValueError):load_config(config)
+
     def test_conflicting_identity_is_not_silently_downgraded(self):
         pages=iter([
             {'alerts':[{'alertId':'a'*64,'eventType':0}], 'hasMore':True,'nextOffset':200},

@@ -79,3 +79,48 @@ def advise(alert, profile, context=None):
         approvalRequiredActions=['isolate_network', 'terminate_process', 'quarantine_file',
                                  'delete_file', 'add_exception', 'restore_backup'],
         automaticActionsPerformed=[])
+
+
+def advise_result(result, profile, context=None):
+    if profile not in PROFILES:
+        raise ValueError('unsupported profile')
+    context=validate_context(context)
+    if (not isinstance(result,dict) or result.get('schema')!='FalconProNativeActionResult/v1' or
+        result.get('action')!='switch_to_enforce' or
+        result.get('reportedOutcome') not in ('cancelled','rejected','failed','outcome_uncertain',
+            'already_enforced_verified','executed_verified') or
+        result.get('executionState')!=result['reportedOutcome']):
+        raise ValueError('unsupported native result')
+    outcome=result['reportedOutcome']
+    advice=['飞书云端记录报告了本机处置结果；这不是设备签名证明，也不代表当前保护状态已再次核实。',
+            '保留原始事件、请求及本机回执的关联证据；不要仅凭这条记录重复执行处置。']
+    if outcome in ('executed_verified','already_enforced_verified'):
+        advice.append('记录报告策略已切换或原已生效；请独立读取当前有效策略，再判断是否还有文件受损。')
+    else:
+        advice.append('执行结果未证实为已生效；保留现场并联系安全人员核对，不自动重试。')
+    extra={
+        'home':'优先确认个人文档和照片是否仍完整，并核对离线且可恢复的备份。',
+        'office':'联系单位 IT 核对共享盘及同步盘的影响范围，提供告警与处置关联 ID。',
+        'developer':'核对近期构建与批量文件任务，不因正常开发活动自动添加目录例外。',
+        'business_critical':'通知值班负责人核对业务连续性和实际策略，避免未经确认重启或终止核心服务。'}
+    if context.get('ongoing_damage') is True:
+        advice.insert(0,'用户报告仍有文件异常变化：及时联系安全人员，评估隔离范围与业务影响。')
+    if context.get('shared_storage') is True:
+        advice.append('涉及共享盘或同步盘时，先与管理员确认其他终端和备份是否受影响。')
+    if context.get('backup_status') == 'missing':
+        advice.append('尚无确认可恢复的备份；不要覆盖现有文件或先行清理。')
+    questions=[]
+    for field,question in (
+        ('ongoing_damage','是否仍有文件异常变化？'),
+        ('recent_activity','当时正在执行什么任务？'),
+        ('backup_status','是否有离线且验证可恢复的备份？'),
+        ('shared_storage','是否涉及共享盘或同步盘？')):
+        if field not in context or context[field]=='unknown':
+            questions.append(question)
+    return dict(assessment='cloud_reported_native_result',reportedOutcome=outcome,
+        protectionOutcome='reported_enforced' if outcome in ('executed_verified','already_enforced_verified') else 'unknown',
+        profile=profile,context=context,contextTrust='user_supplied_not_independently_verified',
+        urgency='urgent_review' if context.get('ongoing_damage') is True else 'review',
+        advice=advice+[extra[profile]],questions=questions,
+        limitations=['云端回执不是当前设备状态或用户已读证明。','未独立复核文件损失、备份和共享盘影响。'],
+        approvalRequiredActions=[],automaticActionsPerformed=[])

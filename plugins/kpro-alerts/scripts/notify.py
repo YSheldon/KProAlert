@@ -5,7 +5,8 @@ from pathlib import Path
 import re
 
 from feishu_reader import read
-from guidance import advise, validate_context, PROFILES
+from feishu_operations import read as read_operations
+from guidance import advise, advise_result, validate_context, PROFILES
 from collector_health import read_health
 from spool import checked
 
@@ -46,13 +47,48 @@ def collect_alerts(source, max_pages, reader=read):
     return alerts,2
 
 
+def collect_results(source, max_pages, reader=read_operations):
+    from notification_journal import _normalize_results
+    results,seen,offset=[],{},0
+    for _ in range(max_pages):
+        try:
+            if reader is read_operations and not checked(source['cli']).is_file():
+                raise ValueError('authorized operations CLI unavailable')
+            page=reader(source['cli'],source['base'],source['table'],200,offset)
+            if not isinstance(page,dict) or type(page.get('hasMore')) is not bool:
+                raise ValueError('invalid operations page')
+            rows=page.get('records')
+            if not isinstance(rows,list) or len(rows)>200 or (page['hasMore'] and not rows):
+                raise ValueError('invalid operations rows')
+            for row in rows:
+                if not isinstance(row,dict) or not isinstance(row.get('recordId'),str) or not re.fullmatch(r'[a-f0-9]{64}',row['recordId']):
+                    raise ValueError('invalid operations identity')
+                if row.get('schema')!='FalconProNativeActionResult/v1':
+                    continue
+                item=_normalize_results([row])[row['recordId']]
+                canonical=json.dumps(item,sort_keys=True,allow_nan=False)
+                if row['recordId'] in seen and seen[row['recordId']]!=canonical:
+                    return [v for v in results if v['recordId']!=row['recordId']],16
+                if row['recordId'] not in seen:
+                    seen[row['recordId']]=canonical;results.append(item)
+            if not page['hasMore']:
+                return results,0
+            next_offset=page.get('nextOffset')
+            if type(next_offset) is not int or next_offset<=offset:
+                raise ValueError('operations pagination did not advance')
+            offset=next_offset
+        except Exception:
+            return results,16
+    return results,32
+
+
 def load_config(path):
     path=checked(path)
     if path.stat().st_size>16384:
         raise ValueError('configuration too large')
     cfg=json.loads(path.read_text(encoding='utf-8-sig'))
     keys={'schema','state','source','profile','context','knownSimulationIds','maxPages','collectorHealth'}
-    if not isinstance(cfg,dict) or cfg.keys()!=keys or cfg['schema']!='KProNotify/v1':
+    if not isinstance(cfg,dict) or not keys <= cfg.keys() or cfg.keys()-keys-{'operationsSource'} or cfg['schema']!='KProNotify/v1':
         raise ValueError('unsupported notification configuration')
     state=Path(cfg['state'])
     if not state.is_absolute() or state.name!='notifications.db':
@@ -73,6 +109,14 @@ def load_config(path):
         raise ValueError('explicit authorized CLI required')
     if any(not isinstance(source[k],str) or not re.fullmatch(r'[A-Za-z0-9]{1,128}',source[k]) for k in ('base','table')):
         raise ValueError('invalid source identity')
+    operations=cfg.get('operationsSource')
+    if operations is not None:
+        if not isinstance(operations,dict) or operations.keys()!={'cli','base','table'}:
+            raise ValueError('invalid operations source')
+        if not isinstance(operations['cli'],str) or not Path(operations['cli']).is_absolute():
+            raise ValueError('explicit operations CLI required')
+        if any(not isinstance(operations[k],str) or not re.fullmatch(r'[A-Za-z0-9]{1,128}',operations[k]) for k in ('base','table')):
+            raise ValueError('invalid operations source identity')
     if cfg['collectorHealth'] is not None and (not isinstance(cfg['collectorHealth'],str) or not Path(cfg['collectorHealth']).is_absolute()):
         raise ValueError('absolute health path required')
     return cfg
@@ -81,10 +125,19 @@ def load_config(path):
 def check(cfg):
     from notification_journal import NotificationJournal
     journal=NotificationJournal(cfg['state'])
-    if not journal.status()['initialized']:
+    status=journal.status()
+    if not status['initialized']:
         return {'error':'Notification baseline is not initialized','baselineRequired':True,
                 'deliveryConfirmed':False,'automaticRemediation':False}
+    operations_source=cfg.get('operationsSource')
+    if operations_source is not None and not status['resultsInitialized']:
+        return {'error':'Result notification baseline is not initialized','baselineRequired':True,
+                'deliveryConfirmed':False,'automaticRemediation':False}
     alerts,code=collect_alerts(cfg['source'],cfg['maxPages'])
+    results=[]
+    if operations_source is not None:
+        results,result_code=collect_results(operations_source,cfg['maxPages'])
+        code|=result_code
     if cfg['collectorHealth']:
         try:
             health=read_health(cfg['collectorHealth'])
@@ -96,23 +149,28 @@ def check(cfg):
     for start in range(0,len(alerts),200):
         batch=journal.prepare(alerts[start:start+200],cfg['knownSimulationIds'])
         if batch['drafts']:batches.append(batch)
+    for start in range(0,len(results),200):
+        batch=journal.prepare_results(results[start:start+200])
+        if batch['drafts']:batches.append(batch)
     fault=journal.prepare([],[],{'active':bool(code),'code':code})
     if fault['drafts']:batches.append(fault)
     for batch in batches:
         for draft in batch['drafts']:
             if draft['kind']=='alert':
                 draft['guidance']=advise(dict(draft['fields'],alertId=draft['alertId']),cfg['profile'],cfg['context'])
+            elif draft['kind']=='result':
+                draft['guidance']=advise_result(draft['fields'],cfg['profile'],cfg['context'])
             else:
                 draft['advice']=['告警采集状态发生变化，请检查数据源及本机采集器；这不是勒索检测结论，也不证明防护正常。']
     return {'schema':'KProNotificationCheck/v1','batches':batches,'faultCode':code,
-            'sourceComplete':code&3==0,'collectorConfigured':bool(cfg['collectorHealth']),
+            'sourceComplete':code&(3|16|32)==0,'collectorConfigured':bool(cfg['collectorHealth']),
             'profile':cfg['profile'],'context':cfg['context'],
             'deliveryConfirmed':False,'automaticRemediation':False}
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command',choices=('baseline','check','ack','uncertain','status'))
+    parser.add_argument('command',choices=('baseline','baseline-results','check','ack','uncertain','status'))
     parser.add_argument('--config',required=True)
     parser.add_argument('--token')
     parser.add_argument('--receipt')
@@ -126,6 +184,11 @@ def main():
         alerts,code=collect_alerts(cfg['source'],cfg['maxPages'])
         if code:raise ValueError('Complete source read required for baseline')
         result=NotificationJournal(cfg['state']).baseline(alerts,cfg['knownSimulationIds'])
+    elif args.command=='baseline-results':
+        if cfg.get('operationsSource') is None:raise ValueError('Explicit operations source required')
+        results,code=collect_results(cfg['operationsSource'],cfg['maxPages'])
+        if code:raise ValueError('Complete operations read required for baseline')
+        result=NotificationJournal(cfg['state']).baseline_results(results)
     elif args.command=='check':
         result=check(cfg)
     else:

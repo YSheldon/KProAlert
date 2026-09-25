@@ -114,6 +114,13 @@ _MUTABLE_ALERT_FIELDS = frozenset(("eventCount", "blockedCount", "terminatedCoun
 _ALLOWED_ALERT_KEYS = SAFE_FIELDS | {"alertId", "simulated", "simulationVerified"}
 _REQUIRED_ALERT_FIELDS = ("eventType",)
 _STATES = frozenset(("prepared", "acknowledged", "uncertain", "baseline"))
+_RESULT_KEYS = frozenset(("recordId", "schema", "eventId", "evidenceSha256",
+    "requestId", "decisionId", "action", "executionState", "reportedOutcome",
+    "verificationProvenance", "beforePolicyVersion", "targetPolicyVersion",
+    "afterPolicyVersion", "simulated", "recordedAt", "client", "approvalState"))
+_REQUIRED_RESULT_KEYS = _RESULT_KEYS - {"afterPolicyVersion", "recordedAt", "client", "approvalState"}
+_RESULT_OUTCOMES = frozenset(("cancelled", "rejected", "failed", "outcome_uncertain",
+    "already_enforced_verified", "executed_verified"))
 
 
 def _normalize_identifier(value, label="identifier"):
@@ -181,6 +188,44 @@ def _normalize_alerts(alert_summaries, max_inputs=MAX_INPUTS):
         if old is not None and old != item:
             raise ValueError("alert ID collision")
         normalized[item["alertId"]] = item
+    return normalized
+
+
+def _normalize_results(values, max_inputs=MAX_INPUTS):
+    if not isinstance(values, (list, tuple)) or len(values) > max_inputs:
+        raise ValueError("result input quota exceeded")
+    normalized = {}
+    for value in values:
+        if not isinstance(value, dict) or set(value) - _RESULT_KEYS:
+            raise ValueError("result contains non-allowlisted fields")
+        if not _REQUIRED_RESULT_KEYS <= set(value) or value["schema"] != "FalconProNativeActionResult/v1":
+            raise ValueError("unsupported native result")
+        for name in ("recordId", "eventId", "evidenceSha256", "requestId", "decisionId"):
+            if not isinstance(value[name], str) or not re.fullmatch(r"[a-f0-9]{64}", value[name]):
+                raise ValueError("invalid result identity")
+        if (type(value["action"]) is not str or value["action"] != "switch_to_enforce" or
+            type(value["executionState"]) is not str or
+            value["executionState"] not in _RESULT_OUTCOMES or
+            type(value["reportedOutcome"]) is not str or
+            value["reportedOutcome"] != value["executionState"] or
+            type(value["verificationProvenance"]) is not str or
+            value["verificationProvenance"] != "verified_locally_not_device_signed" or
+            type(value["simulated"]) is not bool):
+            raise ValueError("invalid result state")
+        for name in ("beforePolicyVersion", "targetPolicyVersion", "afterPolicyVersion"):
+            if name in value and (not isinstance(value[name], str) or
+                not re.fullmatch(r"[0-9]{1,20}", value[name]) or int(value[name]) > MAX_U64):
+                raise ValueError("invalid result version")
+        for name in ("recordedAt", "client", "approvalState"):
+            if name in value and (not isinstance(value[name], str) or len(value[name]) > 80 or
+                not re.fullmatch(r"[A-Za-z0-9_.:+-]{1,80}", value[name])):
+                raise ValueError("invalid result metadata")
+        if value.get("approvalState", "native_receipt_recorded") != "native_receipt_recorded":
+            raise ValueError("invalid result approval state")
+        prior = normalized.get(value["recordId"])
+        if prior is not None and prior != value:
+            raise ValueError("result ID collision")
+        normalized[value["recordId"]] = dict(value)
     return normalized
 
 
@@ -266,7 +311,7 @@ class NotificationJournal:
                 CREATE TABLE IF NOT EXISTS entries (
                     entry_key TEXT PRIMARY KEY,
                     token TEXT NOT NULL REFERENCES batches(token),
-                    kind TEXT NOT NULL CHECK(kind IN ('alert', 'fault')),
+                    kind TEXT NOT NULL CHECK(kind IN ('alert', 'fault', 'result')),
                     alert_id TEXT,
                     payload TEXT NOT NULL,
                     state TEXT NOT NULL CHECK(state IN ('prepared', 'acknowledged', 'uncertain', 'baseline')),
@@ -284,6 +329,10 @@ class NotificationJournal:
                     id INTEGER PRIMARY KEY CHECK(id = 1),
                     baseline_token TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS result_meta (
+                    id INTEGER PRIMARY KEY CHECK(id = 1),
+                    baseline_token TEXT NOT NULL
+                );
                 """
             )
             fault_columns = {
@@ -293,6 +342,31 @@ class NotificationJournal:
                 connection.execute(
                     "ALTER TABLE fault_state ADD COLUMN epoch INTEGER NOT NULL DEFAULT 0"
                 )
+            ddl = connection.execute(
+                "SELECT sql FROM sqlite_master WHERE type='table' AND name='entries'"
+            ).fetchone()[0]
+            if "'result'" not in ddl:
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    ddl = connection.execute(
+                        "SELECT sql FROM sqlite_master WHERE type='table' AND name='entries'"
+                    ).fetchone()[0]
+                    if "'result'" not in ddl:
+                        connection.execute("ALTER TABLE entries RENAME TO entries_old")
+                        connection.execute("""CREATE TABLE entries (
+                            entry_key TEXT PRIMARY KEY,
+                            token TEXT NOT NULL REFERENCES batches(token),
+                            kind TEXT NOT NULL CHECK(kind IN ('alert', 'fault', 'result')),
+                            alert_id TEXT, payload TEXT NOT NULL,
+                            state TEXT NOT NULL CHECK(state IN ('prepared', 'acknowledged', 'uncertain', 'baseline')),
+                            receipt TEXT, created_ns INTEGER NOT NULL)""")
+                        connection.execute("INSERT INTO entries SELECT * FROM entries_old")
+                        connection.execute("DROP TABLE entries_old")
+                        connection.execute("CREATE INDEX entries_token_idx ON entries(token)")
+                    connection.commit()
+                except Exception:
+                    connection.rollback()
+                    raise
 
     @staticmethod
     def _entry_payload(value):
@@ -455,6 +529,87 @@ class NotificationJournal:
             "delivered": False,
         }
 
+    def baseline_results(self, result_summaries):
+        results = _normalize_results(result_summaries, max_inputs=MAX_BASELINE_INPUTS)
+        canonical = _canonical_json({"mode": "results-baseline", "records": [results[key] for key in sorted(results)]})
+        token = "n-" + hashlib.sha256(canonical.encode("ascii")).hexdigest()
+        count = 0
+        skipped = 0
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                if connection.execute("SELECT 1 FROM journal_meta WHERE id=1").fetchone() is None:
+                    raise ValueError("alert baseline must be initialized first")
+                if (connection.execute("SELECT 1 FROM result_meta WHERE id=1").fetchone() is not None or
+                    connection.execute("SELECT 1 FROM entries WHERE kind='result' LIMIT 1").fetchone() is not None):
+                    raise ValueError("result baseline already initialized")
+                existing = connection.execute("SELECT canonical FROM batches WHERE token=?", (token,)).fetchone()
+                if existing is not None and existing[0] != canonical:
+                    raise ValueError("result baseline token collision")
+                connection.execute("INSERT OR IGNORE INTO batches(token, canonical, created_ns) VALUES(?,?,?)",
+                    (token, canonical, time.time_ns()))
+                for record_id in sorted(results):
+                    item = results[record_id]
+                    if item["simulated"]:
+                        skipped += 1
+                        continue
+                    payload = {key: value for key, value in item.items() if key != "recordId"}
+                    if self._insert_entry(connection, token, "result:" + record_id,
+                                          "result", record_id, payload, state="baseline"):
+                        count += 1
+                connection.execute("INSERT INTO result_meta(id, baseline_token) VALUES(1,?)", (token,))
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        return {"schema": "KProNotificationBaseline/v1", "token": token, "drafts": [],
+            "inputCount": len(result_summaries), "baselineCount": count,
+            "skippedSimulationCount": skipped, "initialized": True,
+            "delivered": False, "deliveryConfirmed": False}
+
+    def prepare_results(self, result_summaries):
+        results = _normalize_results(result_summaries)
+        if not results or all(item["simulated"] for item in results.values()):
+            with self._connection() as connection:
+                if connection.execute("SELECT 1 FROM result_meta WHERE id=1").fetchone() is None:
+                    raise ValueError("result notification baseline is not initialized")
+            return {"schema": "KProNotificationPrepare/v1", "token": None,
+                "drafts": [], "inputCount": len(result_summaries),
+                "newDraftCount": 0, "skippedSimulationCount": len(results),
+                "delivered": False, "deliveryConfirmed": False}
+        canonical = _canonical_json({"mode": "results", "records": [results[key] for key in sorted(results)]})
+        token = "n-" + hashlib.sha256(canonical.encode("ascii")).hexdigest()
+        new_keys = []
+        skipped = 0
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                if connection.execute("SELECT 1 FROM result_meta WHERE id=1").fetchone() is None:
+                    raise ValueError("result notification baseline is not initialized")
+                existing = connection.execute("SELECT canonical FROM batches WHERE token=?", (token,)).fetchone()
+                if existing is not None and existing[0] != canonical:
+                    raise ValueError("result notification token collision")
+                connection.execute("INSERT OR IGNORE INTO batches(token, canonical, created_ns) VALUES(?,?,?)",
+                    (token, canonical, time.time_ns()))
+                for record_id in sorted(results):
+                    item = results[record_id]
+                    if item["simulated"]:
+                        skipped += 1
+                        continue
+                    payload = {key: value for key, value in item.items() if key != "recordId"}
+                    entry_key = "result:" + record_id
+                    if self._insert_entry(connection, token, entry_key, "result", record_id, payload):
+                        new_keys.append(entry_key)
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+        drafts = self._drafts_for_keys(token, new_keys)
+        return {"schema": "KProNotificationPrepare/v1", "token": token,
+            "drafts": drafts, "inputCount": len(result_summaries),
+            "newDraftCount": len(drafts), "skippedSimulationCount": skipped,
+            "delivered": False, "deliveryConfirmed": False}
+
     def baseline(self, alert_summaries, known_simulation_ids):
         """Initialize historical state without manufacturing delivery receipts."""
         input_count = len(alert_summaries) if isinstance(alert_summaries, (list, tuple)) else None
@@ -516,7 +671,7 @@ class NotificationJournal:
             "deliveryConfirmed": False,
         }
         if alert_id is not None:
-            draft["alertId"] = alert_id
+            draft["recordId" if kind == "result" else "alertId"] = alert_id
         if receipt is not None:
             draft["nativeReceipt"] = receipt
         return draft
@@ -614,6 +769,9 @@ class NotificationJournal:
             initialized = connection.execute(
                 "SELECT 1 FROM journal_meta WHERE id=1"
             ).fetchone() is not None
+            results_initialized = connection.execute(
+                "SELECT 1 FROM result_meta WHERE id=1"
+            ).fetchone() is not None
             if token is not None and connection.execute(
                 "SELECT 1 FROM batches WHERE token=?", (token,)
             ).fetchone() is None:
@@ -634,6 +792,7 @@ class NotificationJournal:
                     "entryCount": entry_count,
                     "stateCounts": {state: counts.get(state, 0) for state in sorted(_STATES)},
                     "initialized": initialized,
+                    "resultsInitialized": results_initialized,
                     "deliveryConfirmed": False,
                     "faultState": fault_state,
                     "pendingTokens": pending[:20],
@@ -654,6 +813,7 @@ class NotificationJournal:
                 "entryCount": len(rows),
                 "stateCounts": {state: counts.get(state, 0) for state in sorted(_STATES) if counts.get(state, 0)},
                 "initialized": initialized,
+                "resultsInitialized": results_initialized,
                 "acknowledged": bool(rows) and all(row[4] == "acknowledged" for row in rows),
                 "delivered": False,
                 "deliveryConfirmed": False,
