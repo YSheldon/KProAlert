@@ -21,6 +21,30 @@ def alert(alert_id="ALERT-1", sequence=1, **extra):
 
 
 class NotificationJournalTests(unittest.TestCase):
+    def test_result_prepare_does_not_return_a_concurrently_acknowledged_draft(self):
+        journal = NotificationJournal(self.path)
+        journal.baseline([], [])
+        journal.baseline_results([])
+        result = dict(recordId="a" * 64, schema="FalconProNativeActionResult/v1",
+                      eventId="b" * 64, evidenceSha256="c" * 64,
+                      requestId="d" * 64, decisionId="e" * 64,
+                      action="switch_to_enforce", executionState="executed_verified",
+                      reportedOutcome="executed_verified",
+                      verificationProvenance="verified_locally_not_device_signed",
+                      beforePolicyVersion="100", targetPolicyVersion="101",
+                      afterPolicyVersion="101", simulated=False)
+        read_drafts = journal._drafts_for_keys
+
+        def acknowledge_before_read(token, keys):
+            NotificationJournal(self.path).ack(token, "client-native-receipt")
+            return read_drafts(token, keys)
+
+        journal._drafts_for_keys = acknowledge_before_read
+        prepared = journal.prepare_results([result])
+        self.assertEqual(prepared["drafts"], [])
+        self.assertEqual(journal.status(prepared["token"])["stateCounts"],
+                         {"acknowledged": 1})
+
     def test_native_result_is_deduplicated_and_ack_is_not_delivery(self):
         journal = NotificationJournal(self.path)
         journal.baseline([], [])

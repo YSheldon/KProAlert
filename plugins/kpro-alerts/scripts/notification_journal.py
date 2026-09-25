@@ -684,7 +684,7 @@ class NotificationJournal:
             for entry_key in sorted(set(entry_keys)):
                 row = connection.execute(
                     "SELECT entry_key, kind, alert_id, payload, state, receipt "
-                    "FROM entries WHERE token=? AND entry_key=?",
+                    "FROM entries WHERE token=? AND entry_key=? AND state='prepared'",
                     (token, entry_key),
                 ).fetchone()
                 if row is not None:

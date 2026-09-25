@@ -88,6 +88,10 @@ validated operations projection produce no production notification draft.
 
 Repeated checks do not emit an already reserved event again. This avoids duplicate
 alerts but means a crash between preparation and delivery requires reconciliation.
+The post-commit draft read now omits entries another worker has already marked
+acknowledged or uncertain. A state change after that read is still possible;
+sharing one journal among independent senders is not an exactly-once delivery
+service. Check native history before any uncertain resend.
 Use `notify.py status --config <file>` for outstanding state. A completed command,
 MCP connection or model-generated statement is not a native receipt.
 
