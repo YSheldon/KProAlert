@@ -8,7 +8,9 @@ protection behavior. No driver update, re-signing, PPL change or new audit polic
 is required for this analysis feature. Do not switch a protected endpoint to
 Audit or disable existing protection to feed the AI.
 
-The adapters share the same MCP contract (ZCode acceptance is deferred). Assessments, recommendations and
+The adapters share the same MCP contract. ZCode has a bounded native-session
+readback of one simulated cloud result; its scheduled notification and live
+endpoint-action acceptance remain open. Assessments, recommendations and
 unapproved request records can be stored and explicitly uploaded with exact
 Feishu readback. First-release AI does not execute termination, quarantine,
 deletion, exceptions, isolation or policy changes. Existing driver blocking and
