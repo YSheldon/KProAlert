@@ -46,6 +46,11 @@ If `operationsSource` is configured, also run `notify.py baseline-results
 the existing operations history and marks those native-result records as
 historical, not newly delivered. A missing or incomplete result baseline
 blocks result notification preparation; never skip it to flush old records.
+Baseline CLI failures return fixed `reason` and `faultCode` fields without
+printing the source CLI path, OAuth material or raw exception. For example,
+`operations_source_incomplete` with code 16 means the bounded result read
+failed; `result_baseline_already_initialized` is a separate local state error.
+Neither response acknowledges or retries a remote write.
 
 Then run `notify.py check --config <file>` at five-minute intervals using the
 assistant's native automation. No new draft means remain quiet. Each read is

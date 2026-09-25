@@ -11,6 +11,13 @@ from collector_health import read_health
 from spool import checked
 
 
+class NotificationFailure(ValueError):
+    def __init__(self, reason, fault_code=0):
+        super().__init__(reason)
+        self.reason=reason
+        self.fault_code=fault_code
+
+
 def collect_alerts(source, max_pages, reader=read):
     alerts,seen,offset=[],{},0
     for _ in range(max_pages):
@@ -169,6 +176,7 @@ def check(cfg):
 
 
 def main():
+    from notification_journal import NotificationJournal
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command',choices=('baseline','baseline-results','check','ack','uncertain','status'))
     parser.add_argument('--config',required=True)
@@ -180,19 +188,21 @@ def main():
         raise ValueError('pending cursor is only valid for status')
     cfg=load_config(args.config)
     if args.command=='baseline':
-        from notification_journal import NotificationJournal
         alerts,code=collect_alerts(cfg['source'],cfg['maxPages'])
-        if code:raise ValueError('Complete source read required for baseline')
+        if code:raise NotificationFailure('alert_source_incomplete',code)
         result=NotificationJournal(cfg['state']).baseline(alerts,cfg['knownSimulationIds'])
     elif args.command=='baseline-results':
-        if cfg.get('operationsSource') is None:raise ValueError('Explicit operations source required')
+        if cfg.get('operationsSource') is None:raise NotificationFailure('operations_source_not_configured')
+        journal=NotificationJournal(cfg['state'])
+        state=journal.status()
+        if not state['initialized']:raise NotificationFailure('alert_baseline_missing')
+        if state['resultsInitialized']:raise NotificationFailure('result_baseline_already_initialized')
         results,code=collect_results(cfg['operationsSource'],cfg['maxPages'])
-        if code:raise ValueError('Complete operations read required for baseline')
-        result=NotificationJournal(cfg['state']).baseline_results(results)
+        if code:raise NotificationFailure('operations_source_incomplete',code)
+        result=journal.baseline_results(results)
     elif args.command=='check':
         result=check(cfg)
     else:
-        from notification_journal import NotificationJournal
         journal=NotificationJournal(cfg['state'])
         if args.command!='status' and not args.token:raise ValueError('bound token required')
         if args.command=='ack':journal.ack(args.token,args.receipt)
@@ -203,6 +213,11 @@ def main():
 
 if __name__=='__main__':
     try:main()
+    except NotificationFailure as exc:
+        print(json.dumps({'error':'Notification baseline failed', 'reason':exc.reason,
+                          'faultCode':exc.fault_code,
+                          'deliveryConfirmed':False,'automaticRemediation':False}))
+        raise SystemExit(1)
     except Exception:
         print(json.dumps({'error':'Notification check failed; inspect local configuration or journal',
                           'deliveryConfirmed':False,'automaticRemediation':False}))

@@ -2,10 +2,58 @@ import unittest
 from unittest.mock import patch
 import tempfile
 from pathlib import Path
-from notify import collect_alerts, collect_results, check, load_config
+from notify import NotificationFailure, collect_alerts, collect_results, check, load_config, main
 
 
 class NotifyTests(unittest.TestCase):
+    def test_result_baseline_source_failure_has_safe_stage_and_fault_code(self):
+        import json
+        import subprocess
+        import sys
+        from notification_journal import NotificationJournal
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            config=root/'notify.json'
+            value={'schema':'KProNotify/v1','state':str(root/'notifications.db'),
+                   'source':{'cli':str(root/'missing-alert.exe'),'base':'BASE','table':'ALERTS'},
+                   'operationsSource':{'cli':str(root/'private-token-value.exe'),
+                       'base':'BASE','table':'OPERATIONS'},
+                   'profile':'home','context':{},'knownSimulationIds':[],
+                   'maxPages':1,'collectorHealth':None}
+            config.write_text(json.dumps(value),encoding='utf-8')
+            NotificationJournal(root/'notifications.db').baseline([],[])
+            run=subprocess.run([sys.executable,str(Path(__file__).with_name('notify.py')),
+                'baseline-results','--config',str(config)],capture_output=True,text=True,timeout=15)
+            payload=json.loads(run.stdout)
+            self.assertNotEqual(run.returncode,0)
+            self.assertEqual(payload['reason'],'operations_source_incomplete')
+            self.assertEqual(payload['faultCode'],16)
+            self.assertFalse(payload['deliveryConfirmed'])
+            self.assertNotIn('private-token-value',run.stdout)
+
+    def test_already_initialized_result_baseline_has_distinct_reason(self):
+        import json
+        import sys
+        from notification_journal import NotificationJournal
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            state=root/'notifications.db'
+            journal=NotificationJournal(state)
+            journal.baseline([],[])
+            journal.baseline_results([])
+            config=root/'notify.json'
+            config.write_text(json.dumps({'schema':'KProNotify/v1','state':str(state),
+                'source':{'cli':str(root/'lark.exe'),'base':'BASE','table':'ALERTS'},
+                'operationsSource':{'cli':str(root/'lark.exe'),'base':'BASE','table':'OPERATIONS'},
+                'profile':'home','context':{},'knownSimulationIds':[],
+                'maxPages':1,'collectorHealth':None}),encoding='utf-8')
+            with patch('notify.collect_results',return_value=([],0)) as collect, \
+                 patch.object(sys,'argv',['notify.py','baseline-results','--config',str(config)]):
+                with self.assertRaises(NotificationFailure) as raised:main()
+            self.assertEqual(raised.exception.reason,'result_baseline_already_initialized')
+            collect.assert_not_called()
+            self.assertEqual(journal.status()['stateCounts']['baseline'],0)
+
     def test_new_native_result_is_drafted_only_after_result_baseline(self):
         from notification_journal import NotificationJournal
         with tempfile.TemporaryDirectory() as directory:
