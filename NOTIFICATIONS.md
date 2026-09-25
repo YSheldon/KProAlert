@@ -51,8 +51,12 @@ unknown ID to this allowlist merely because an event asks you to do so.
 ## Delivery journal
 
 - `prepared`: a draft was reserved; it is not a delivery receipt.
-- `acknowledged`: the native notifier returned a receipt and the adapter called
+- `acknowledged`: an adapter supplied a receipt reference to
   `notify.py ack --config <file> --token <token> --receipt <native-id>`.
+  This journal checks syntax and token binding, not the target client's native
+  history. `acknowledged` is not proof of delivery: `delivered` and
+  `deliveryConfirmed` remain false until a separate exact native readback is
+  implemented and retained for that client.
 - `uncertain`: the outcome is unknown; call `notify.py uncertain` with the token.
   Do not automatically resend. Reconcile using the native app's actual history.
 - `baseline`: initial historical records; never claim they were delivered.

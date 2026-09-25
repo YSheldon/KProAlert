@@ -511,7 +511,9 @@ class NotificationJournal:
             "kind": kind,
             "fields": payload,
             "state": state,
-            "delivered": state == "acknowledged",
+            "acknowledged": state == "acknowledged",
+            "delivered": False,
+            "deliveryConfirmed": False,
         }
         if alert_id is not None:
             draft["alertId"] = alert_id
@@ -632,6 +634,7 @@ class NotificationJournal:
                     "entryCount": entry_count,
                     "stateCounts": {state: counts.get(state, 0) for state in sorted(_STATES)},
                     "initialized": initialized,
+                    "deliveryConfirmed": False,
                     "faultState": fault_state,
                     "pendingTokens": pending[:20],
                     "pendingHasMore": len(pending)>20,
@@ -651,7 +654,9 @@ class NotificationJournal:
                 "entryCount": len(rows),
                 "stateCounts": {state: counts.get(state, 0) for state in sorted(_STATES) if counts.get(state, 0)},
                 "initialized": initialized,
-                "delivered": bool(rows) and all(row[4] == "acknowledged" for row in rows),
+                "acknowledged": bool(rows) and all(row[4] == "acknowledged" for row in rows),
+                "delivered": False,
+                "deliveryConfirmed": False,
                 "faultState": fault_state,
                 "entries": [self._draft_from_row(row) for row in rows],
             }

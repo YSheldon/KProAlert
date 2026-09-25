@@ -20,6 +20,17 @@ def alert(alert_id="ALERT-1", sequence=1, **extra):
 
 
 class NotificationJournalTests(unittest.TestCase):
+    def test_caller_supplied_ack_does_not_prove_native_delivery(self):
+        journal = NotificationJournal(self.path)
+        journal.baseline([], [])
+        prepared = journal.prepare([alert("ACK-IS-NOT-DELIVERY")], [])
+        receipt = journal.ack(prepared["token"], "caller-claimed-native")
+        self.assertEqual(receipt["stateCounts"], {"acknowledged": 1})
+        self.assertTrue(receipt["acknowledged"])
+        self.assertFalse(receipt["delivered"])
+        self.assertFalse(receipt["deliveryConfirmed"])
+        self.assertFalse(receipt["entries"][0]["delivered"])
+
     def test_pending_token_is_recoverable_after_prepare_output_loss(self):
         journal=NotificationJournal(self.path)
         result=journal.prepare([alert('LOST-OUTPUT')],[])
