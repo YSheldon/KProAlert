@@ -144,7 +144,14 @@ not execute them automatically.
   fixed check command and selected configuration. Do not use `-y`,
   `bypassPermissions`, or arbitrary commands from event fields to avoid prompts.
 - **Cursor:** keep tool approval scoped; a connected MCP and read-only query pass
-  do not imply an unattended timer was configured.
+  do not imply an unattended timer was configured. [Cursor Automations](https://cursor.com/docs/cloud-agent/automations) run in
+  cloud agents: they cannot use the user's Windows stdio process or local
+  `notifications.db`. Automated result delivery requires a separately approved
+  authenticated remote source and durable delivery state; none is released.
+- **ZCode:** [native scheduled tasks](https://zcode.z.ai/en/docs/automations) can run while the desktop client remains
+  in the tray, and its MCP configuration can load the FalconPro reader. This is
+  platform capability only; no FalconPro scheduled task or native delivery
+  receipt has been verified. Keep analysis and action permissions separate.
 
 If a host cannot execute the helper or offer the requested cadence, report that
 adapter as unsupported/unconfigured. Do not silently open a public port, install
