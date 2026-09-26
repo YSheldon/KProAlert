@@ -1,4 +1,5 @@
 import concurrent.futures
+from contextlib import closing
 import json
 import sqlite3
 import tempfile
@@ -20,6 +21,168 @@ def alert(alert_id="ALERT-1", sequence=1, **extra):
 
 
 class NotificationJournalTests(unittest.TestCase):
+    def test_native_result_is_deduplicated_and_ack_is_not_delivery(self):
+        journal = NotificationJournal(self.path)
+        journal.baseline([], [])
+        journal.baseline_results([])
+        result = dict(recordId="a" * 64, schema="FalconProNativeActionResult/v1",
+                      eventId="b" * 64, evidenceSha256="c" * 64,
+                      requestId="d" * 64, decisionId="e" * 64,
+                      action="switch_to_enforce", executionState="executed_verified",
+                      reportedOutcome="executed_verified",
+                      verificationProvenance="verified_locally_not_device_signed",
+                      beforePolicyVersion="100", targetPolicyVersion="101",
+                      afterPolicyVersion="101", simulated=False)
+        first = journal.prepare_results([result])
+        self.assertEqual(first["drafts"][0]["kind"], "result")
+        self.assertEqual(first["drafts"][0]["recordId"], result["recordId"])
+        self.assertEqual(NotificationJournal(self.path).prepare_results([result])["drafts"], [])
+        acknowledged = journal.ack(first["token"], "claimed-client-receipt")
+        self.assertTrue(acknowledged["acknowledged"])
+        self.assertFalse(acknowledged["deliveryConfirmed"])
+        self.assertFalse(acknowledged["entries"][0]["delivered"])
+        simulated = dict(result, recordId="f" * 64, simulated=True)
+        self.assertEqual(journal.prepare_results([simulated])["drafts"], [])
+
+    def test_old_alert_table_migrates_without_losing_its_baseline(self):
+        with closing(sqlite3.connect(self.path)) as connection:
+            connection.executescript("""
+                CREATE TABLE batches(token TEXT PRIMARY KEY, canonical TEXT NOT NULL, created_ns INTEGER NOT NULL);
+                CREATE TABLE entries(entry_key TEXT PRIMARY KEY, token TEXT NOT NULL REFERENCES batches(token),
+                    kind TEXT NOT NULL CHECK(kind IN ('alert', 'fault')), alert_id TEXT,
+                    payload TEXT NOT NULL, state TEXT NOT NULL
+                    CHECK(state IN ('prepared', 'acknowledged', 'uncertain', 'baseline')),
+                    receipt TEXT, created_ns INTEGER NOT NULL);
+                CREATE TABLE journal_meta(id INTEGER PRIMARY KEY CHECK(id = 1), baseline_token TEXT NOT NULL);
+                INSERT INTO batches VALUES('n-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','old',1);
+                INSERT INTO entries VALUES('alert:OLD','n-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                    'alert','OLD','{"eventType":7}','baseline',NULL,1);
+                INSERT INTO journal_meta VALUES(1,'n-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+            """)
+        journal = NotificationJournal(self.path)
+        self.assertEqual(journal.status()["stateCounts"]["baseline"], 1)
+        journal.baseline_results([])
+        result = dict(recordId="a" * 64, schema="FalconProNativeActionResult/v1",
+                      eventId="b" * 64, evidenceSha256="c" * 64,
+                      requestId="d" * 64, decisionId="e" * 64,
+                      action="switch_to_enforce", executionState="executed_verified",
+                      reportedOutcome="executed_verified",
+                      verificationProvenance="verified_locally_not_device_signed",
+                      beforePolicyVersion="100", targetPolicyVersion="101",
+                      afterPolicyVersion="101", simulated=False)
+        self.assertEqual(journal.prepare_results([result])["newDraftCount"], 1)
+        self.assertEqual(journal.status()["stateCounts"]["baseline"], 1)
+
+    def test_concurrent_open_of_old_alert_table_preserves_its_rows(self):
+        with closing(sqlite3.connect(self.path)) as connection:
+            connection.executescript("""
+                CREATE TABLE batches(token TEXT PRIMARY KEY, canonical TEXT NOT NULL, created_ns INTEGER NOT NULL);
+                CREATE TABLE entries(entry_key TEXT PRIMARY KEY, token TEXT NOT NULL REFERENCES batches(token),
+                    kind TEXT NOT NULL CHECK(kind IN ('alert', 'fault')), alert_id TEXT,
+                    payload TEXT NOT NULL, state TEXT NOT NULL
+                    CHECK(state IN ('prepared', 'acknowledged', 'uncertain', 'baseline')),
+                    receipt TEXT, created_ns INTEGER NOT NULL);
+                CREATE TABLE journal_meta(id INTEGER PRIMARY KEY CHECK(id = 1), baseline_token TEXT NOT NULL);
+                INSERT INTO batches VALUES('n-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','old',1);
+                INSERT INTO entries VALUES('alert:OLD','n-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                    'alert','OLD','{"eventType":7}','baseline',NULL,1);
+                INSERT INTO journal_meta VALUES(1,'n-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+            """)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            values=list(pool.map(lambda _:NotificationJournal(self.path).status(),range(4)))
+        self.assertTrue(all(value["stateCounts"]["baseline"]==1 for value in values))
+
+    def test_legacy_fault_epoch_and_result_kind_migrate_together(self):
+        with closing(sqlite3.connect(self.path)) as connection:
+            connection.executescript("""
+                CREATE TABLE batches(token TEXT PRIMARY KEY, canonical TEXT NOT NULL, created_ns INTEGER NOT NULL);
+                CREATE TABLE entries(entry_key TEXT PRIMARY KEY, token TEXT NOT NULL REFERENCES batches(token),
+                    kind TEXT NOT NULL CHECK(kind IN ('alert', 'fault')), alert_id TEXT,
+                    payload TEXT NOT NULL, state TEXT NOT NULL
+                    CHECK(state IN ('prepared', 'acknowledged', 'uncertain', 'baseline')),
+                    receipt TEXT, created_ns INTEGER NOT NULL);
+                CREATE TABLE fault_state(id INTEGER PRIMARY KEY CHECK(id = 1), active INTEGER NOT NULL, code INTEGER);
+                CREATE TABLE journal_meta(id INTEGER PRIMARY KEY CHECK(id = 1), baseline_token TEXT NOT NULL);
+                INSERT INTO batches VALUES('n-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa','old',1);
+                INSERT INTO entries VALUES('alert:OLD','n-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+                    'alert','OLD','{"eventType":7}','baseline',NULL,1);
+                INSERT INTO journal_meta VALUES(1,'n-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+            """)
+        journal = NotificationJournal(self.path)
+        self.assertEqual(journal.status()["stateCounts"]["baseline"], 1)
+        self.assertEqual(journal.status()["faultState"]["epoch"], 0)
+        journal.baseline_results([])
+        self.assertTrue(journal.status()["resultsInitialized"])
+
+    def test_result_source_requires_explicit_historical_baseline(self):
+        journal = NotificationJournal(self.path)
+        journal.baseline([], [])
+        old = dict(recordId="a" * 64, schema="FalconProNativeActionResult/v1",
+                   eventId="b" * 64, evidenceSha256="c" * 64,
+                   requestId="d" * 64, decisionId="e" * 64,
+                   action="switch_to_enforce", executionState="executed_verified",
+                   reportedOutcome="executed_verified",
+                   verificationProvenance="verified_locally_not_device_signed",
+                   beforePolicyVersion="100", targetPolicyVersion="101",
+                   afterPolicyVersion="101", simulated=False)
+        with self.assertRaises(ValueError):
+            journal.prepare_results([old])
+        initial = journal.baseline_results([old])
+        self.assertEqual(initial["baselineCount"], 1)
+        self.assertEqual(initial["drafts"], [])
+        self.assertEqual(journal.prepare_results([old])["drafts"], [])
+        new = dict(old, recordId="f" * 64)
+        self.assertEqual(journal.prepare_results([new])["newDraftCount"], 1)
+        with self.assertRaises(ValueError):
+            journal.baseline_results([])
+
+    def test_result_projection_rejects_private_or_malformed_fields(self):
+        journal = NotificationJournal(self.path)
+        journal.baseline([], [])
+        journal.baseline_results([])
+        good = dict(recordId="a" * 64, schema="FalconProNativeActionResult/v1",
+                    eventId="b" * 64, evidenceSha256="c" * 64,
+                    requestId="d" * 64, decisionId="e" * 64,
+                    action="switch_to_enforce", executionState="executed_verified",
+                    reportedOutcome="executed_verified",
+                    verificationProvenance="verified_locally_not_device_signed",
+                    beforePolicyVersion="100", targetPolicyVersion="101",
+                    afterPolicyVersion="101", simulated=False)
+        for change in (dict(path="C:\\Users\\Private"), dict(cmdline="powershell"),
+                       dict(simulated="false"), dict(executionState=[]),
+                       dict(verificationProvenance="device_attested")):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                journal.prepare_results([dict(good, **change)])
+        self.assertEqual(journal.status()["entryCount"], 0)
+
+    def test_simulated_result_pages_do_not_accumulate_empty_batches(self):
+        journal = NotificationJournal(self.path)
+        journal.baseline([], [])
+        journal.baseline_results([])
+        before = journal.status()["batchCount"]
+        for index in range(20):
+            result = dict(recordId=f"{index + 1:064x}", schema="FalconProNativeActionResult/v1",
+                          eventId="b" * 64, evidenceSha256="c" * 64,
+                          requestId="d" * 64, decisionId="e" * 64,
+                          action="switch_to_enforce", executionState="executed_verified",
+                          reportedOutcome="executed_verified",
+                          verificationProvenance="verified_locally_not_device_signed",
+                          beforePolicyVersion="100", targetPolicyVersion="101",
+                          afterPolicyVersion="101", simulated=True)
+            self.assertEqual(journal.prepare_results([result])["drafts"], [])
+        self.assertEqual(journal.status()["batchCount"], before)
+
+    def test_caller_supplied_ack_does_not_prove_native_delivery(self):
+        journal = NotificationJournal(self.path)
+        journal.baseline([], [])
+        prepared = journal.prepare([alert("ACK-IS-NOT-DELIVERY")], [])
+        receipt = journal.ack(prepared["token"], "caller-claimed-native")
+        self.assertEqual(receipt["stateCounts"], {"acknowledged": 1})
+        self.assertTrue(receipt["acknowledged"])
+        self.assertFalse(receipt["delivered"])
+        self.assertFalse(receipt["deliveryConfirmed"])
+        self.assertFalse(receipt["entries"][0]["delivered"])
+
     def test_pending_token_is_recoverable_after_prepare_output_loss(self):
         journal=NotificationJournal(self.path)
         result=journal.prepare([alert('LOST-OUTPUT')],[])
