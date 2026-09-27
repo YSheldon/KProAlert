@@ -2,11 +2,13 @@
 
 Branch: `codex/collector-safe-replicas-20260926`.
 Base: `91fdd2eed4da35205a87921f4d689cb3890c05b8`.
-Local uncommitted candidate only; no push, merge, runtime installation or release.
+Committed as `babc34a` and pushed on this topic branch for Draft PR #35,
+which depends on PR #33. It is not merged into the release branch, installed
+on an endpoint, or included in a runtime release.
 
 ## Verified
 
-- Existing `.venv` full unittest discovery: 345 total, 343 pass, 0 failures,
+- Latest `.venv` full unittest discovery: 351 total, 349 pass, 0 failures,
   2 skipped for unavailable host symlink privileges. All launched test processes
   exited. No new SDK or toolchain was installed.
 - Native collector-health regression covers optional typed diagnostics,
