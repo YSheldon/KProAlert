@@ -12,6 +12,6 @@ manifest = json.loads((plugin / '.codex-plugin/plugin.json').read_text())
 assert manifest['name'] == 'kpro-alerts'
 assert manifest['skills'] == './skills/'
 assert (plugin / 'skills/kpro-alerts/SKILL.md').is_file()
-for name in ('query.py', 'mcp_server.py', 'feishu_reader.py', 'kpro_alert_bridge.py'):
+for name in ('query.py', 'mcp_server.py', 'feishu_reader.py', 'kpro_alert_bridge.py', 'safe_replica.py'):
     assert (plugin / 'scripts' / name).is_file(), name
 print('PASS: plugin and marketplace package structure')

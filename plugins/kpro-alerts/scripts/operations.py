@@ -155,7 +155,7 @@ def _source(path):
     return db
 
 
-def _evidence(row):
+def _evidence(row, db=None):
     event_id, device, session, received, raw = row
     identifier(event_id)
     if not isinstance(raw, str) or len(raw.encode('utf-8')) > 65536:
@@ -181,6 +181,14 @@ def _evidence(row):
     if '_nativeSource' in event:
         from native_provenance import validate_source
         native['nativeSource']=validate_source(event['_nativeSource'])
+    elif db is not None:
+        from safe_replica import source_for_event
+        locator = source_for_event(db, event_id)
+        if locator is not None:
+            native['nativeSource'] = locator
+            # Bind the query-time locator exactly as legacy inline locators,
+            # without mutating the retained event's raw representation.
+            event = dict(event, _nativeSource=locator)
     return dict(schema='FalconProEventEvidence/v1', eventId=event_id,
                 evidenceSha256=digest(dict(eventId=event_id, device=device, session=session, received=received, event=event)),
                 deviceId=pseudonym(device), sessionId=pseudonym(session), received=safe_timestamp(received),
@@ -196,7 +204,7 @@ def evidence(path, event_id):
         rows = db.execute('SELECT id,device,session,received,raw FROM events WHERE id=? LIMIT 2', (event_id,)).fetchall()
         if len(rows) != 1:
             raise ValueError('Event unavailable or duplicated')
-        return _evidence(rows[0])
+        return _evidence(rows[0], db)
     finally:
         db.close()
 
@@ -209,9 +217,12 @@ def events(path, after=0, limit=100):
         rows = db.execute('SELECT rowid,id,device,session,received,raw FROM events WHERE rowid>? ORDER BY rowid LIMIT ?',
                           (after, limit + 1)).fetchall()
         page = rows[:limit]
-        loss = db.execute('SELECT COALESCE(SUM(dropped),0) FROM batches').fetchone()[0]
-        return dict(events=[_evidence(row[1:]) for row in page], nextCursor=page[-1][0] if page else after,
+        from safe_replica import reported_dropped, reported_source_states
+        loss = reported_dropped(db)
+        return dict(events=[_evidence(row[1:], db) for row in page], nextCursor=page[-1][0] if page else after,
                     hasMore=len(rows) > limit, reportedDropped=loss,
+                    reportedSourceStates=reported_source_states(db, [row[1] for row in page]),
+                    sourceStateProvenance='unverified_public_metadata',
                     eventTypeNames={str(i):name for i,name in enumerate(EVENT_NAMES)},
                     operationBits={'1':'read','2':'write','4':'execute','8':'rename','16':'delete',
                                    '32':'truncate','64':'reparse','128':'security','256':'create'},

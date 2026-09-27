@@ -8,6 +8,7 @@ import stat
 import sqlite3
 import time
 from kpro_alert_bridge import Store, ingest_document, feishu_sender
+from safe_replica import SCHEMA as REPLICA_SCHEMA, MAX_REPLICA_BYTES, read_bounded
 
 MAX_BATCH_BYTES = 5 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
@@ -60,13 +61,18 @@ def consume(store, spool_path, device, archive=False):
     if not root.is_dir():
         raise ValueError('spool must be a directory')
     result = dict(importedFiles=0, failedFiles=0, importedEvents=0, errors=[])
+    result.update(sourceState='analysis_only', sourceAttestation='unverified_public_metadata', nativeSourceVerified=False)
     # Bound enumeration as well as parsing. The producer must enforce its own quota.
     import heapq
     count = 0
+    scanned = 0
     def candidates():
-        nonlocal count
+        nonlocal count, scanned
         with os.scandir(root) as entries:
             for entry in entries:
+                scanned += 1
+                if scanned > 10000:
+                    raise RuntimeError('spool exceeds supported directory capacity')
                 if entry.name.endswith('.json'):
                     count += 1
                     if count > 10000:
@@ -78,18 +84,19 @@ def consume(store, spool_path, device, archive=False):
         try:
             checked(path)
             info = path.stat()
-            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > MAX_BATCH_BYTES:
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > MAX_REPLICA_BYTES:
                 raise ValueError('invalid batch size/type')
-            with path.open('rb') as stream:
-                content = stream.read(MAX_BATCH_BYTES + 1)
-            if len(content) > MAX_BATCH_BYTES:
-                raise ValueError('batch too large')
+            content = read_bounded(path)
             digest = hashlib.sha256(content).hexdigest()
             document = json.loads(content.decode('utf-8-sig'))
-            validate_safe_batch(document)
-            document['dropped'] = document.get('dropped',0) + document.get('projectionDropped',0)
-            # Producer file identity distinguishes equal empty loss-only batches.
-            document = dict(document, batchId=path.name)
+            replica = isinstance(document, dict) and document.get('schema') == REPLICA_SCHEMA
+            if not replica:
+                if len(content) > MAX_BATCH_BYTES:
+                    raise ValueError('batch too large')
+                validate_safe_batch(document)
+                document['dropped'] = document.get('dropped',0) + document.get('projectionDropped',0)
+                # Legacy file identity keeps its original semantics.
+                document = dict(document, batchId=path.name)
             target = None
             if archive:
                 folder = root/'archive'
@@ -105,7 +112,7 @@ def consume(store, spool_path, device, archive=False):
                 target = folder/(digest + '-' + path.name)
                 if target.exists():
                     raise RuntimeError('archive collision; reconcile rather than overwrite')
-            result['importedEvents'] += ingest_document(store, device, document)
+            result['importedEvents'] += store.ingest_replica(device, content) if replica else ingest_document(store, device, document)
             if target:
                 after = path.stat()
                 if (after.st_size, after.st_mtime_ns, after.st_ino) != (info.st_size, info.st_mtime_ns, info.st_ino):
