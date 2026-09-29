@@ -6,6 +6,31 @@ from notify import NotificationFailure, collect_alerts, collect_results, check, 
 
 
 class NotifyTests(unittest.TestCase):
+    def test_missing_result_baseline_preserves_alert_and_collector_monitoring(self):
+        from notification_journal import NotificationJournal
+        with tempfile.TemporaryDirectory() as directory:
+            cfg={'state':str(Path(directory)/'notifications.db'),'source':{},
+                 'operationsSource':{},'maxPages':1,'collectorHealth':'configured-health',
+                 'knownSimulationIds':[],'profile':'home','context':{}}
+            journal=NotificationJournal(cfg['state'])
+            journal.baseline([],[])
+            alert={'alertId':'a'*64,'eventType':7,'operation':8}
+            unhealthy={'receiptFresh':False,'stopped':False,'status':0,'collectorDropped':0}
+            with patch('notify.collect_alerts',return_value=([alert],0)), \
+                 patch('notify.collect_results') as results_reader, \
+                 patch('notify.read_health',return_value=unhealthy):
+                first=check(cfg)
+                drafts=[d for batch in first.get('batches',[]) for d in batch['drafts']]
+                self.assertEqual([d['alertId'] for d in drafts if d['kind']=='alert'],[alert['alertId']])
+                faults=[d for d in drafts if d['kind']=='fault']
+                self.assertEqual(len(faults),1)
+                self.assertTrue(faults[0]['fields']['code'] & 8)
+                self.assertTrue(first['resultsBaselineRequired'])
+                self.assertFalse(first['sourceComplete'])
+                self.assertEqual(check(cfg)['batches'],[])
+                results_reader.assert_not_called()
+            self.assertFalse(journal.status()['resultsInitialized'])
+
     def test_result_baseline_source_failure_has_safe_stage_and_fault_code(self):
         import json
         import subprocess
@@ -72,12 +97,15 @@ class NotifyTests(unittest.TestCase):
                 self.assertTrue(check(cfg)['baselineRequired'])
                 journal.baseline_results([])
                 draft=[d for batch in check(cfg)['batches'] for d in batch['drafts']]
-                self.assertEqual(len(draft),1)
-                self.assertEqual(draft[0]['kind'],'result')
-                self.assertEqual(draft[0]['recordId'],result['recordId'])
-                self.assertFalse(draft[0]['deliveryConfirmed'])
-                self.assertEqual(draft[0]['guidance']['profile'],'home')
-                self.assertTrue(draft[0]['guidance']['questions'])
+                self.assertEqual(len(draft),2)
+                results=[d for d in draft if d['kind']=='result']
+                self.assertEqual(len(results),1)
+                self.assertEqual(results[0]['recordId'],result['recordId'])
+                self.assertFalse(results[0]['deliveryConfirmed'])
+                self.assertEqual(results[0]['guidance']['profile'],'home')
+                self.assertTrue(results[0]['guidance']['questions'])
+                recovery=[d for d in draft if d['kind']=='fault']
+                self.assertEqual(recovery[0]['fields'],{'active':False,'code':64})
                 self.assertEqual(check(cfg)['batches'],[])
             with patch('notify.collect_alerts',return_value=([],0)), \
                  patch('notify.collect_results',return_value=([],16)):
