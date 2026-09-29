@@ -137,12 +137,12 @@ def check(cfg):
         return {'error':'Notification baseline is not initialized','baselineRequired':True,
                 'deliveryConfirmed':False,'automaticRemediation':False}
     operations_source=cfg.get('operationsSource')
-    if operations_source is not None and not status['resultsInitialized']:
-        return {'error':'Result notification baseline is not initialized','baselineRequired':True,
-                'deliveryConfirmed':False,'automaticRemediation':False}
+    results_baseline_required=operations_source is not None and not status['resultsInitialized']
     alerts,code=collect_alerts(cfg['source'],cfg['maxPages'])
     results=[]
-    if operations_source is not None:
+    if results_baseline_required:
+        code|=64
+    elif operations_source is not None:
         results,result_code=collect_results(operations_source,cfg['maxPages'])
         code|=result_code
     if cfg['collectorHealth']:
@@ -170,7 +170,8 @@ def check(cfg):
             else:
                 draft['advice']=['告警采集状态发生变化，请检查数据源及本机采集器；这不是勒索检测结论，也不证明防护正常。']
     return {'schema':'KProNotificationCheck/v1','batches':batches,'faultCode':code,
-            'sourceComplete':code&(3|16|32)==0,'collectorConfigured':bool(cfg['collectorHealth']),
+            'sourceComplete':code&(3|16|32|64)==0,'collectorConfigured':bool(cfg['collectorHealth']),
+            'baselineRequired':results_baseline_required,'resultsBaselineRequired':results_baseline_required,
             'profile':cfg['profile'],'context':cfg['context'],
             'deliveryConfirmed':False,'automaticRemediation':False}
 
