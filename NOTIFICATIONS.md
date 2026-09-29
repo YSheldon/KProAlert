@@ -46,6 +46,10 @@ If `operationsSource` is configured, also run `notify.py baseline-results
 the existing operations history and marks those native-result records as
 historical, not newly delivered. A missing or incomplete result baseline
 blocks result notification preparation; never skip it to flush old records.
+Existing alert and collector-health monitoring continues during this condition.
+The check returns `resultsBaselineRequired=true`, marks source coverage incomplete,
+and emits a deduplicated collection fault using bit 64. Completing the result
+baseline permits result monitoring and produces one recovery transition.
 Baseline CLI failures return fixed `reason` and `faultCode` fields without
 printing the source CLI path, OAuth material or raw exception. For example,
 `operations_source_incomplete` with code 16 means the bounded result read
@@ -88,6 +92,9 @@ validated operations projection produce no production notification draft.
 
 Repeated checks do not emit an already reserved event again. This avoids duplicate
 alerts but means a crash between preparation and delivery requires reconciliation.
+Pages containing only previously reserved entries do not persist new empty
+batches. Skipped simulated result rows are excluded from result batch identity,
+so changing test records cannot grow the production notification journal.
 Use `notify.py status --config <file>` for outstanding state. A completed command,
 MCP connection or model-generated statement is not a native receipt.
 
