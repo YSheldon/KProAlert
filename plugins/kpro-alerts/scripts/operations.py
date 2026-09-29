@@ -155,7 +155,7 @@ def _source(path):
     return db
 
 
-def _evidence(row):
+def _evidence(row, db=None):
     event_id, device, session, received, raw = row
     identifier(event_id)
     if not isinstance(raw, str) or len(raw.encode('utf-8')) > 65536:
@@ -181,6 +181,14 @@ def _evidence(row):
     if '_nativeSource' in event:
         from native_provenance import validate_source
         native['nativeSource']=validate_source(event['_nativeSource'])
+    elif db is not None:
+        from safe_replica import source_for_event
+        locator = source_for_event(db, event_id)
+        if locator is not None:
+            native['nativeSource'] = locator
+            # Bind the query-time locator exactly as legacy inline locators,
+            # without mutating the retained event's raw representation.
+            event = dict(event, _nativeSource=locator)
     return dict(schema='FalconProEventEvidence/v1', eventId=event_id,
                 evidenceSha256=digest(dict(eventId=event_id, device=device, session=session, received=received, event=event)),
                 deviceId=pseudonym(device), sessionId=pseudonym(session), received=safe_timestamp(received),
@@ -196,7 +204,7 @@ def evidence(path, event_id):
         rows = db.execute('SELECT id,device,session,received,raw FROM events WHERE id=? LIMIT 2', (event_id,)).fetchall()
         if len(rows) != 1:
             raise ValueError('Event unavailable or duplicated')
-        return _evidence(rows[0])
+        return _evidence(rows[0], db)
     finally:
         db.close()
 
@@ -209,9 +217,12 @@ def events(path, after=0, limit=100):
         rows = db.execute('SELECT rowid,id,device,session,received,raw FROM events WHERE rowid>? ORDER BY rowid LIMIT ?',
                           (after, limit + 1)).fetchall()
         page = rows[:limit]
-        loss = db.execute('SELECT COALESCE(SUM(dropped),0) FROM batches').fetchone()[0]
-        return dict(events=[_evidence(row[1:]) for row in page], nextCursor=page[-1][0] if page else after,
+        from safe_replica import reported_dropped, reported_source_states
+        loss = reported_dropped(db)
+        return dict(events=[_evidence(row[1:], db) for row in page], nextCursor=page[-1][0] if page else after,
                     hasMore=len(rows) > limit, reportedDropped=loss,
+                    reportedSourceStates=reported_source_states(db, [row[1] for row in page]),
+                    sourceStateProvenance='unverified_public_metadata',
                     eventTypeNames={str(i):name for i,name in enumerate(EVENT_NAMES)},
                     operationBits={'1':'read','2':'write','4':'execute','8':'rename','16':'delete',
                                    '32':'truncate','64':'reparse','128':'security','256':'create'},
@@ -370,13 +381,46 @@ class Operations:
             if changed != 1:
                 raise ValueError('Record already reserved; reconcile before retry')
 
+    def remember_remote_id(self, record_id, destination, remote_id):
+        identifier(record_id)
+        identifier(destination)
+        if not isinstance(remote_id, str) or not re.fullmatch('rec[A-Za-z0-9]{1,100}', remote_id):
+            raise ValueError('Invalid remote receipt')
+        with self._transaction():
+            row = self.db.execute('SELECT state,record_id,destination FROM ops_outbox WHERE id=?',
+                                  (record_id,)).fetchone()
+            if row is None or row[0] != 'pending' or row[2] != destination:
+                raise ValueError('Remote receipt has no matching pending destination')
+            if row[1] is not None and row[1] != remote_id:
+                raise ValueError('Remote receipt identity changed')
+            if row[1] is None:
+                changed = self.db.execute(
+                    'UPDATE ops_outbox SET record_id=? WHERE id=? AND state=\'pending\' '
+                    'AND destination=? AND record_id IS NULL',
+                    (remote_id, record_id, destination)).rowcount
+                if changed != 1:
+                    raise ValueError('Remote receipt reservation changed')
+
+    def pending_remote_id(self, record_id, destination):
+        identifier(record_id)
+        identifier(destination)
+        row = self.db.execute('SELECT state,record_id,destination FROM ops_outbox WHERE id=?',
+                              (record_id,)).fetchone()
+        if row is None or row[0] != 'pending' or row[2] != destination:
+            raise ValueError('Record is not pending for that destination')
+        if row[1] is not None and (not isinstance(row[1], str) or
+                                   not re.fullmatch('rec[A-Za-z0-9]{1,100}', row[1])):
+            raise ValueError('Persisted remote receipt is invalid')
+        return row[1]
+
     def ack(self, record_id, destination, remote_id):
         if not isinstance(remote_id, str) or not re.fullmatch('rec[A-Za-z0-9]{1,100}', remote_id):
             raise ValueError('Invalid remote receipt')
         with self._transaction():
             changed = self.db.execute('UPDATE ops_outbox SET state=\'acknowledged\',record_id=? '
-                                      'WHERE id=? AND state=\'pending\' AND destination=?',
-                                      (remote_id, identifier(record_id), identifier(destination))).rowcount
+                                      'WHERE id=? AND state=\'pending\' AND destination=? '
+                                      'AND (record_id IS NULL OR record_id=?)',
+                                      (remote_id, identifier(record_id), identifier(destination), remote_id)).rowcount
             if changed != 1:
                 raise ValueError('Receipt does not match pending destination')
 

@@ -46,6 +46,10 @@ If `operationsSource` is configured, also run `notify.py baseline-results
 the existing operations history and marks those native-result records as
 historical, not newly delivered. A missing or incomplete result baseline
 blocks result notification preparation; never skip it to flush old records.
+Existing alert and collector-health monitoring continues during this condition.
+The check returns `resultsBaselineRequired=true`, marks source coverage incomplete,
+and emits a deduplicated collection fault using bit 64. Completing the result
+baseline permits result monitoring and produces one recovery transition.
 Baseline CLI failures return fixed `reason` and `faultCode` fields without
 printing the source CLI path, OAuth material or raw exception. For example,
 `operations_source_incomplete` with code 16 means the bounded result read
@@ -88,6 +92,13 @@ validated operations projection produce no production notification draft.
 
 Repeated checks do not emit an already reserved event again. This avoids duplicate
 alerts but means a crash between preparation and delivery requires reconciliation.
+The post-commit draft read now omits entries another worker has already marked
+acknowledged or uncertain. A state change after that read is still possible;
+sharing one journal among independent senders is not an exactly-once delivery
+service. Check native history before any uncertain resend.
+Pages containing only previously reserved entries do not persist new empty
+batches. Skipped simulated result rows are excluded from result batch identity,
+so changing test records cannot grow the production notification journal.
 Use `notify.py status --config <file>` for outstanding state. A completed command,
 MCP connection or model-generated statement is not a native receipt.
 
@@ -144,7 +155,14 @@ not execute them automatically.
   fixed check command and selected configuration. Do not use `-y`,
   `bypassPermissions`, or arbitrary commands from event fields to avoid prompts.
 - **Cursor:** keep tool approval scoped; a connected MCP and read-only query pass
-  do not imply an unattended timer was configured.
+  do not imply an unattended timer was configured. [Cursor Automations](https://cursor.com/docs/cloud-agent/automations) run in
+  cloud agents: they cannot use the user's Windows stdio process or local
+  `notifications.db`. Automated result delivery requires a separately approved
+  authenticated remote source and durable delivery state; none is released.
+- **ZCode:** [native scheduled tasks](https://zcode.z.ai/en/docs/automations) can run while the desktop client remains
+  in the tray, and its MCP configuration can load the FalconPro reader. This is
+  platform capability only; no FalconPro scheduled task or native delivery
+  receipt has been verified. Keep analysis and action permissions separate.
 
 If a host cannot execute the helper or offer the requested cadence, report that
 adapter as unsupported/unconfigured. Do not silently open a public port, install

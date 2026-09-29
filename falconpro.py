@@ -72,7 +72,7 @@ def main():
     ops.add_argument('--base')
     ops.add_argument('--table')
     ops.add_argument('--record-id')
-    ops.add_argument('--remote-record-id')
+    ops.add_argument('--remote-record-id', help='Optional; if omitted, reconcile searches the exact local Analysis ID')
     ops.add_argument('--apply', action='store_true')
     args=parser.parse_args()
     if args.command=='operations':

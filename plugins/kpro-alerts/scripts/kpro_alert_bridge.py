@@ -5,16 +5,26 @@ import json
 import sqlite3
 import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
+
+
+def _event_id(device, session, sequence):
+    return hashlib.sha256(json.dumps([device, session, sequence]).encode()).hexdigest()
 
 
 class Store:
-    def __init__(self, path, max_events=100000):
+    def __init__(self, path, max_events=100000, max_storage_bytes=512 * 1024 * 1024):
         if type(max_events) is not int or not 1 <= max_events <= 1000000:
             raise ValueError('invalid event capacity')
+        if type(max_storage_bytes) is not int or not 1 <= max_storage_bytes <= 512 * 1024 * 1024:
+            raise ValueError('invalid storage budget')
         self.max_events = max_events
+        self.max_storage_bytes = max_storage_bytes
         self.db = sqlite3.connect(path, timeout=10)
+        self.database_path = next(row[2] for row in self.db.execute('PRAGMA database_list') if row[1] == 'main')
         self.db.execute('PRAGMA journal_mode=WAL')
         self.db.execute('PRAGMA synchronous=FULL')
+        self.db.execute('PRAGMA foreign_keys=ON')
         # Bound database growth; WAL checkpoints run at SQLite's default threshold.
         page_size = self.db.execute('PRAGMA page_size').fetchone()[0]
         self.db.execute('PRAGMA max_page_count=%d' % (512 * 1024 * 1024 // page_size))
@@ -25,6 +35,25 @@ class Store:
             id TEXT PRIMARY KEY, state TEXT, record_id TEXT, payload TEXT)''')
         self.db.execute('''CREATE TABLE IF NOT EXISTS batches (
             id TEXT PRIMARY KEY, device TEXT, session TEXT, dropped INTEGER)''')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS batch_sources (
+            source_id TEXT PRIMARY KEY, batch_id TEXT NOT NULL UNIQUE REFERENCES batches(id),
+            device TEXT NOT NULL, device_digest TEXT NOT NULL, generation TEXT NOT NULL,
+            created INTEGER NOT NULL, producer_session TEXT NOT NULL, producer_batch_id TEXT NOT NULL,
+            prepared_hash TEXT NOT NULL, raw_hash TEXT NOT NULL, safe_hash TEXT NOT NULL,
+            collector_dropped TEXT NOT NULL, projection_dropped TEXT NOT NULL,
+            source_state TEXT NOT NULL CHECK(source_state='analysis_only'),
+            attestation TEXT NOT NULL CHECK(attestation='unverified_public_metadata'))''')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS batch_commits (
+            source_id TEXT NOT NULL REFERENCES batch_sources(source_id), commit_id TEXT NOT NULL,
+            helper_hash TEXT NOT NULL, PRIMARY KEY(source_id,commit_id))''')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS event_batches (
+            event_id TEXT NOT NULL REFERENCES events(id), source_id TEXT NOT NULL REFERENCES batch_sources(source_id),
+            record_index INTEGER NOT NULL CHECK(record_index BETWEEN 0 AND 1023),
+            PRIMARY KEY(source_id,record_index))''')
+        self.db.execute('CREATE INDEX IF NOT EXISTS event_batches_by_event ON event_batches(event_id)')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS source_lifecycle (
+            source_id TEXT PRIMARY KEY REFERENCES batch_sources(source_id),
+            reported_state TEXT NOT NULL CHECK(reported_state='retired'))''')
 
     def __enter__(self):
         return self
@@ -35,7 +64,35 @@ class Store:
     def ingest(self, device, session, event):
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
+            self._check_storage_budget()
             return self._ingest(device, session, event)
+
+    def _storage_observation(self):
+        sizes = []
+        for suffix in ('', '-wal', '-shm'):
+            if not self.database_path:
+                sizes.append(0)
+                continue
+            try:
+                sizes.append(Path(self.database_path + suffix).stat().st_size)
+            except FileNotFoundError:
+                if not suffix:
+                    raise RuntimeError('database unavailable for storage budget measurement')
+                sizes.append(0)
+        total = sum(sizes)
+        return dict(databaseFileBytes=sizes[0], databaseWalBytes=sizes[1], databaseShmBytes=sizes[2],
+                    databaseTotalFileBytes=total,
+                    storageBudgetState=('at_or_over_observed_limit' if total >= self.max_storage_bytes
+                                        else 'within_observed_limit'),
+                    storageBudgetEnforcement='observed_before_ingest_not_transaction_hard_cap')
+
+    def _check_storage_budget(self):
+        if not self.db.in_transaction:
+            raise RuntimeError('storage budget check requires a write transaction')
+        # This is an admission check, not a bound on the next transaction's WAL.
+        # Never checkpoint or remove uncertain delivery state to create space.
+        if self._storage_observation()['databaseTotalFileBytes'] >= self.max_storage_bytes:
+            raise RuntimeError('observed storage budget reached; existing evidence retained')
 
     def _ingest(self, device, session, event):
         if any(not isinstance(v, str) or not 1 <= len(v) <= 128 for v in (device, session)) or not isinstance(event, dict):
@@ -48,8 +105,7 @@ class Store:
         raw = json.dumps(event, ensure_ascii=False, sort_keys=True, allow_nan=False)
         if len(raw.encode('utf-8')) > 65536:
             raise ValueError('event exceeds 64 KiB')
-        identity = json.dumps([device, session, event['sequence']])
-        uid = hashlib.sha256(identity.encode()).hexdigest()
+        uid = _event_id(device, session, event['sequence'])
         old = self.db.execute('SELECT raw FROM events WHERE id=?', (uid,)).fetchone()
         if old:
             if old[0] != raw:
@@ -61,14 +117,70 @@ class Store:
                         (uid, device, session, datetime.now(timezone.utc).isoformat(), raw))
         return True
 
+    def ingest_replica(self, device, document):
+        from safe_replica import loads_replica, parse_replica, SOURCE_STATE, ATTESTATION
+        replica = loads_replica(document) if type(document) is bytes else parse_replica(document)
+        if not isinstance(device, str) or not 1 <= len(device) <= 128:
+            raise ValueError('local device label required')
+        batch_id = 'replica:' + replica.slot
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            self._check_storage_budget()
+            prior = self.db.execute('SELECT source_id,prepared_hash,device FROM batch_sources WHERE batch_id=?',
+                                    (batch_id,)).fetchone()
+            if prior and prior != (replica.source_id, replica.prepared_hash, device):
+                raise ValueError('conflicting producer batch identity')
+            if not prior:
+                if self.db.execute('SELECT COUNT(*) FROM batches').fetchone()[0] >= self.max_events:
+                    raise RuntimeError('batch capacity reached')
+                # Keep the legacy four-column table stable. Exact unsigned loss is
+                # counted once from the source, not once per helper/commit version.
+                self.db.execute('INSERT INTO batches VALUES (?,?,?,?)', (batch_id, device, replica.session, 0))
+                self.db.execute('INSERT INTO batch_sources VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+                    (replica.source_id, batch_id, device, replica.device, str(replica.generation), replica.created,
+                     replica.session, replica.batch, replica.prepared_hash, replica.raw_hash, replica.safe_hash,
+                     str(replica.collector_dropped), str(replica.projection_dropped), SOURCE_STATE, ATTESTATION))
+            inserted = 0
+            for event, index in zip(replica.records, replica.record_indices):
+                uid = _event_id(device, replica.session, event['sequence'])
+                old = self.db.execute('SELECT raw FROM events WHERE id=?', (uid,)).fetchone()
+                if old:
+                    existing = json.loads(old[0])
+                    if isinstance(existing, dict) and '_nativeSource' in existing:
+                        from native_provenance import validate_source
+                        validate_source(existing.pop('_nativeSource'))
+                    if json.dumps(existing, ensure_ascii=False, sort_keys=True, allow_nan=False) != json.dumps(
+                            event, ensure_ascii=False, sort_keys=True, allow_nan=False):
+                        raise ValueError('sequence collision: use a new driver session ID')
+                else:
+                    inserted += self._ingest(device, replica.session, event)
+                self.db.execute('INSERT OR IGNORE INTO event_batches VALUES (?,?,?)', (uid, replica.source_id, index))
+            if not self.db.execute('SELECT 1 FROM batch_commits WHERE source_id=? AND commit_id=?',
+                                   (replica.source_id, replica.commit_id)).fetchone():
+                if self.db.execute('SELECT COUNT(*) FROM batch_commits').fetchone()[0] >= self.max_events:
+                    raise RuntimeError('replica commit capacity reached')
+                self.db.execute('INSERT INTO batch_commits VALUES (?,?,?)',
+                                (replica.source_id, replica.commit_id, replica.helper_hash))
+            if replica.reported_state == 'retired':
+                # Older replicas cannot clear a later retirement claim. This is
+                # user-readable metadata, not protected native retirement proof.
+                self.db.execute('INSERT OR IGNORE INTO source_lifecycle VALUES (?,?)',
+                                (replica.source_id, 'retired'))
+        return inserted
+
+    def source_for_event(self, event_id):
+        from safe_replica import source_for_event
+        return source_for_event(self.db, event_id)
+
     def health(self):
+        from safe_replica import reported_dropped
         return dict(storedEvents=self.db.execute('SELECT COUNT(*) FROM events').fetchone()[0],
                     eventCapacity=self.max_events,
-                    reportedDropped=self.db.execute('SELECT COALESCE(SUM(dropped),0) FROM batches').fetchone()[0],
+                    reportedDropped=reported_dropped(self.db),
                     uncertainDeliveries=self.db.execute("SELECT COUNT(*) FROM deliveries WHERE state='pending'").fetchone()[0],
-                    storageByteLimit=512*1024*1024,
+                    storageByteLimit=self.max_storage_bytes,
                     databaseAllocatedBytes=self.db.execute('PRAGMA page_count').fetchone()[0]*self.db.execute('PRAGMA page_size').fetchone()[0],
-                    collectorStatus='not_probed', protectionStatus='not_probed')
+                    collectorStatus='not_probed', protectionStatus='not_probed', **self._storage_observation())
 
     def export(self):
         groups = {}
@@ -175,6 +287,7 @@ def ingest_document(store, device, document):
     digest = hashlib.sha256(json.dumps([device, document], sort_keys=True).encode()).hexdigest()
     with store.db:
         store.db.execute('BEGIN IMMEDIATE')
+        store._check_storage_budget()
         if store.db.execute('SELECT 1 FROM batches WHERE id=?', (digest,)).fetchone():
             return 0
         if store.db.execute('SELECT COUNT(*) FROM batches').fetchone()[0] >= store.max_events:

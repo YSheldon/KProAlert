@@ -514,7 +514,12 @@ class NotificationJournal:
                     ).fetchall()
                     old_keys = {row[0] for row in before}
                     new_keys.extend(row[0] for row in after if row[0] not in old_keys)
-                connection.commit()
+                if new_keys:
+                    connection.commit()
+                else:
+                    # A repeated page is not new journal evidence. In particular,
+                    # do not persist empty batches for different page groupings.
+                    connection.rollback()
             except Exception:
                 connection.rollback()
                 raise
@@ -569,18 +574,19 @@ class NotificationJournal:
 
     def prepare_results(self, result_summaries):
         results = _normalize_results(result_summaries)
-        if not results or all(item["simulated"] for item in results.values()):
+        skipped = sum(item["simulated"] for item in results.values())
+        results = {key: item for key, item in results.items() if not item["simulated"]}
+        if not results:
             with self._connection() as connection:
                 if connection.execute("SELECT 1 FROM result_meta WHERE id=1").fetchone() is None:
                     raise ValueError("result notification baseline is not initialized")
             return {"schema": "KProNotificationPrepare/v1", "token": None,
                 "drafts": [], "inputCount": len(result_summaries),
-                "newDraftCount": 0, "skippedSimulationCount": len(results),
+                "newDraftCount": 0, "skippedSimulationCount": skipped,
                 "delivered": False, "deliveryConfirmed": False}
         canonical = _canonical_json({"mode": "results", "records": [results[key] for key in sorted(results)]})
         token = "n-" + hashlib.sha256(canonical.encode("ascii")).hexdigest()
         new_keys = []
-        skipped = 0
         with self._connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             try:
@@ -593,14 +599,14 @@ class NotificationJournal:
                     (token, canonical, time.time_ns()))
                 for record_id in sorted(results):
                     item = results[record_id]
-                    if item["simulated"]:
-                        skipped += 1
-                        continue
                     payload = {key: value for key, value in item.items() if key != "recordId"}
                     entry_key = "result:" + record_id
                     if self._insert_entry(connection, token, entry_key, "result", record_id, payload):
                         new_keys.append(entry_key)
-                connection.commit()
+                if new_keys:
+                    connection.commit()
+                else:
+                    connection.rollback()
             except Exception:
                 connection.rollback()
                 raise
@@ -684,7 +690,7 @@ class NotificationJournal:
             for entry_key in sorted(set(entry_keys)):
                 row = connection.execute(
                     "SELECT entry_key, kind, alert_id, payload, state, receipt "
-                    "FROM entries WHERE token=? AND entry_key=?",
+                    "FROM entries WHERE token=? AND entry_key=? AND state='prepared'",
                     (token, entry_key),
                 ).fetchone()
                 if row is not None:

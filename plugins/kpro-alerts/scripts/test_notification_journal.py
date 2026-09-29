@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from notification_journal import (
     MAX_BASELINE_INPUTS,
@@ -21,6 +22,53 @@ def alert(alert_id="ALERT-1", sequence=1, **extra):
 
 
 class NotificationJournalTests(unittest.TestCase):
+    def test_prepare_does_not_return_draft_after_concurrent_state_change(self):
+        result = dict(recordId="a" * 64, schema="FalconProNativeActionResult/v1",
+                      eventId="b" * 64, evidenceSha256="c" * 64,
+                      requestId="d" * 64, decisionId="e" * 64,
+                      action="switch_to_enforce", executionState="executed_verified",
+                      reportedOutcome="executed_verified",
+                      verificationProvenance="verified_locally_not_device_signed",
+                      beforePolicyVersion="100", targetPolicyVersion="101",
+                      afterPolicyVersion="101", simulated=False)
+        for kind in ("alert", "fault-active", "fault-recovered", "result"):
+            for transition in ("acknowledged", "uncertain"):
+                with self.subTest(kind=kind, transition=transition):
+                    path = Path(self.temp.name) / (kind + "-" + transition + ".db")
+                    journal = NotificationJournal(path)
+                    journal.baseline([], [])
+                    if kind == "result":
+                        journal.baseline_results([])
+                    if kind == "fault-recovered":
+                        prior = journal.prepare([], [], {"active": True, "code": 5})
+                        journal.ack(prior["token"], "prior-fault-receipt")
+                    read_drafts = journal._drafts_for_keys
+
+                    def change_state_before_read(token, keys):
+                        def change_state():
+                            concurrent = NotificationJournal(path)
+                            if transition == "acknowledged":
+                                concurrent.ack(token, "client-native-receipt")
+                            else:
+                                concurrent.mark_uncertain(token)
+
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                            pool.submit(change_state).result(timeout=5)
+                        return read_drafts(token, keys)
+
+                    journal._drafts_for_keys = change_state_before_read
+                    if kind == "alert":
+                        prepared = journal.prepare([alert("CONCURRENT")], [])
+                    elif kind == "fault-active":
+                        prepared = journal.prepare([], [], {"active": True, "code": 5})
+                    elif kind == "fault-recovered":
+                        prepared = journal.prepare([], [], {"active": False})
+                    else:
+                        prepared = journal.prepare_results([result])
+                    self.assertEqual(prepared["drafts"], [])
+                    self.assertEqual(journal.status(prepared["token"])["stateCounts"],
+                                     {transition: 1})
+
     def test_native_result_is_deduplicated_and_ack_is_not_delivery(self):
         journal = NotificationJournal(self.path)
         journal.baseline([], [])
@@ -182,6 +230,46 @@ class NotificationJournalTests(unittest.TestCase):
         self.assertFalse(receipt["delivered"])
         self.assertFalse(receipt["deliveryConfirmed"])
         self.assertFalse(receipt["entries"][0]["delivered"])
+
+    def test_mixed_result_pages_cannot_grow_empty_batches_at_entry_quota(self):
+        journal = NotificationJournal(self.path)
+        journal.baseline([], [])
+        real = dict(recordId="a" * 64, schema="FalconProNativeActionResult/v1",
+                    eventId="b" * 64, evidenceSha256="c" * 64,
+                    requestId="d" * 64, decisionId="e" * 64,
+                    action="switch_to_enforce", executionState="executed_verified",
+                    reportedOutcome="executed_verified",
+                    verificationProvenance="verified_locally_not_device_signed",
+                    beforePolicyVersion="100", targetPolicyVersion="101",
+                    afterPolicyVersion="101", simulated=False)
+        journal.baseline_results([real])
+        before = journal.status()["batchCount"]
+        with patch("notification_journal.MAX_ENTRIES", 1):
+            for index in range(25):
+                simulated = dict(real, recordId=f"{index + 1:064x}", simulated=True)
+                result = journal.prepare_results([real, simulated])
+                self.assertEqual(result["newDraftCount"], 0)
+                self.assertEqual(result["skippedSimulationCount"], 1)
+        reopened = NotificationJournal(self.path).status()
+        self.assertEqual(reopened["batchCount"], before)
+        self.assertEqual(reopened["entryCount"], 1)
+        new_real = dict(real, recordId="f" * 64)
+        mixed = journal.prepare_results([new_real, dict(real, recordId="1" * 64, simulated=True)])
+        self.assertEqual(mixed["newDraftCount"], 1)
+        self.assertEqual(journal.prepare_results([new_real])["token"], mixed["token"])
+        self.assertEqual(journal.status()["batchCount"], before + 1)
+        with self.assertRaises(ValueError):
+            journal.prepare_results([dict(real, eventId="9" * 64)])
+        self.assertEqual(journal.status()["batchCount"], before + 1)
+
+    def test_duplicate_alert_page_combinations_do_not_persist_empty_batches(self):
+        journal = NotificationJournal(self.path)
+        journal.baseline([alert("OLD-A"), alert("OLD-B", sequence=2)], [])
+        before = journal.status()["batchCount"]
+        for page in ([alert("OLD-A")], [alert("OLD-B", sequence=2)],
+                     [alert("OLD-A"), alert("OLD-B", sequence=2)]):
+            self.assertEqual(journal.prepare(page, [])["newDraftCount"], 0)
+        self.assertEqual(journal.status()["batchCount"], before)
 
     def test_pending_token_is_recoverable_after_prepare_output_loss(self):
         journal=NotificationJournal(self.path)

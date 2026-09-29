@@ -18,7 +18,7 @@ from operations import V1_CAPABILITIES
 
 _source_hash = hashlib.sha256(b''.join(
     Path(__file__).with_name(name).read_bytes()
-    for name in ('mcp_server.py', 'query.py', 'feishu_reader.py', 'feishu_operations.py', 'guidance.py', 'collector_health.py', 'endpoint.py', 'EndpointFacts.ps1', 'windows_tools.py', 'operations.py', 'notification_journal.py', 'native_actions.py', 'native_provenance.py', 'native_receipt_reader.py', 'spool.py'))).hexdigest()
+    for name in ('mcp_server.py', 'query.py', 'feishu_reader.py', 'feishu_operations.py', 'guidance.py', 'collector_health.py', 'endpoint.py', 'EndpointFacts.ps1', 'windows_tools.py', 'operations.py', 'notification_journal.py', 'native_actions.py', 'native_provenance.py', 'native_receipt_reader.py', 'spool.py', 'safe_replica.py', 'kpro_alert_bridge.py'))).hexdigest()
 _source_hash = hashlib.sha256(bytes.fromhex(_source_hash) + Path(__file__).with_name('source_egress.py').read_bytes()).hexdigest()
 _started_pid = os.getpid()
 _plugin_version = json.loads((Path(__file__).parents[1] / '.codex-plugin/plugin.json').read_text())['version']
